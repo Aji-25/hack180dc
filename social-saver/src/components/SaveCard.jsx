@@ -1,17 +1,24 @@
 import { useState, useRef, useEffect } from 'react'
-import { ArrowUpRight, Trash2, Share2, RotateCw, Pencil, Check, X, ChevronRight, BookOpen, Sparkles, ThumbsUp, ThumbsDown, Loader2 } from 'lucide-react'
-import { marked } from 'marked'
+import { ArrowUpRight, Trash2, Share2, Pencil, Check, X, ChevronRight, Sparkles, Loader2 } from 'lucide-react'
 import { SOURCE_LABELS } from '../lib/constants'
 import { supabase } from '../lib/supabase'
 import { useToast } from './Toast'
 
 function timeAgo(dateStr) {
     const seconds = Math.floor((Date.now() - new Date(dateStr).getTime()) / 1000)
-    if (seconds < 60) return 'now'
-    if (seconds < 3600) return `${Math.floor(seconds / 60)}m`
-    if (seconds < 86400) return `${Math.floor(seconds / 3600)}h`
-    if (seconds < 604800) return `${Math.floor(seconds / 86400)}d`
+    if (seconds < 60) return 'Just now'
+    if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`
+    if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`
+    if (seconds < 604800) return `${Math.floor(seconds / 86400)}d ago`
     return new Date(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+}
+
+const SOURCE_ICONS = {
+    instagram: '📸',
+    x: '𝕏',
+    twitter: '𝕏',
+    youtube: '▶',
+    blog: '📄',
 }
 
 export default function SaveCard({ save, onDelete, onUpdate }) {
@@ -21,7 +28,6 @@ export default function SaveCard({ save, onDelete, onUpdate }) {
     const [retrying, setRetrying] = useState(false)
     const [researching, setResearching] = useState(false)
     const [dossier, setDossier] = useState(null)
-    const [showActions, setShowActions] = useState(false)
     const inputRef = useRef(null)
     const toast = useToast()
 
@@ -45,10 +51,11 @@ export default function SaveCard({ save, onDelete, onUpdate }) {
     }
 
     const handleDelete = async () => {
+        if (!confirm('Are you sure you want to delete this save?')) return
         try {
             await supabase.from('saves').delete().eq('id', id)
             if (onDelete) onDelete(id)
-            toast.success('Save deleted')
+            toast.success('Deleted')
         } catch (e) {
             console.error(e)
             toast.error('Failed to delete')
@@ -56,12 +63,11 @@ export default function SaveCard({ save, onDelete, onUpdate }) {
     }
 
     const handleShare = async () => {
-        const shareUrl = url
         try {
-            await navigator.clipboard.writeText(shareUrl)
-            toast.success('Link copied to clipboard')
+            await navigator.clipboard.writeText(url)
+            toast.success('Link copied!')
         } catch {
-            prompt('Copy this link:', shareUrl)
+            prompt('Copy this link:', url)
         }
     }
 
@@ -77,7 +83,7 @@ export default function SaveCard({ save, onDelete, onUpdate }) {
             const data = await res.json()
             if (data.success && onUpdate) {
                 onUpdate({ ...save, ...data, status: 'complete', error_msg: null })
-                toast.success('AI re-classification complete')
+                toast.success('AI re-classification done')
             }
         } catch (e) {
             console.error(e)
@@ -98,7 +104,7 @@ export default function SaveCard({ save, onDelete, onUpdate }) {
             const data = await res.json()
             if (data.dossier) {
                 setDossier(data.dossier)
-                toast.success('Research Dossier Generated')
+                toast.success('Dossier Generated ✨')
             } else {
                 toast.error('Research failed')
             }
@@ -111,142 +117,220 @@ export default function SaveCard({ save, onDelete, onUpdate }) {
 
     const handleAcceptPrediction = async () => {
         try {
-            // Remove 'predicted' tag and set status to complete
             const newTags = (tags || []).filter(t => t !== 'predicted')
             const { error } = await supabase.from('saves').update({ status: 'complete', tags: newTags }).eq('id', id)
             if (!error && onUpdate) {
                 onUpdate({ ...save, status: 'complete', tags: newTags })
-                toast.success('Suggestion added to saves')
+                toast.success('Added to saves')
             }
         } catch (e) {
             toast.error('Error accepting')
         }
     }
 
+    const isPredicted = status === 'predicted' || (tags || []).includes('predicted')
+    const hostname = (() => { try { return new URL(url).hostname.replace('www.', '') } catch { return url } })()
+
+    /* ─── Render ─── */
     return (
-        <div
-            className="p-4 flex flex-col gap-2 min-h-[140px] group relative"
-            onMouseEnter={() => setShowActions(true)}
-            onMouseLeave={() => setShowActions(false)}
-        >
-            {/* Top: source + time + status */}
-            <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                    <span className={`source-label source-${source}`}>
-                        {SOURCE_LABELS[source] || source}
+        <div className="card group" style={{ display: 'flex', flexDirection: 'column', minHeight: '280px', height: '100%' }}>
+
+            {/* ── HEADER ── */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '24px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+                    <span style={{
+                        width: '42px', height: '42px', borderRadius: '50%',
+                        background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.06)',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        fontSize: '16px', flexShrink: 0,
+                    }}>
+                        {SOURCE_ICONS[source] || '🔗'}
                     </span>
-                    <span className={`dot ${status === 'pending_note' ? 'dot-pending' : status === 'error' ? 'dot-err' : 'dot-ok'}`} />
-                </div>
-                <div className="flex items-center gap-1.5">
-                    {/* Hover actions (always visible on mobile via CSS) */}
-                    <div className={`card-actions flex items-center gap-0.5 transition-opacity ${showActions ? 'opacity-100' : 'opacity-0'}`}>
-                        <button onClick={handleShare} className="p-1.5 rounded text-text-tertiary hover:text-text-secondary transition-colors" title="Copy link">
-                            <Share2 className="w-3 h-3" />
-                        </button>
-                        {status === 'error' && (
-                            <button onClick={handleRetry} disabled={retrying} className="p-1.5 rounded text-text-tertiary hover:text-accent transition-colors" title="Retry AI">
-                                <RotateCw className={`w-3 h-3 ${retrying ? 'animate-spin' : ''}`} />
-                            </button>
-                        )}
-                        <button onClick={handleDelete} className="p-1.5 rounded text-text-tertiary hover:text-red transition-colors" title="Delete">
-                            <Trash2 className="w-3 h-3" />
-                        </button>
-                    </div>
-                    <span className="text-[11px] text-text-tertiary font-mono tabular-nums">
-                        {timeAgo(created_at)}
-                    </span>
-                </div>
-            </div>
-
-            {/* Category badge */}
-            <div>
-                <span className={`cat-badge cat-${category}`}>{category}</span>
-            </div>
-
-            {/* Summary */}
-            <p className="text-[13px] text-text-secondary leading-[1.55]">
-                {summary || 'Saved link'}
-            </p>
-
-            {/* Action steps (if present) */}
-            {action_steps && action_steps.length > 0 && (
-                <div className="flex flex-col gap-1 pl-1">
-                    {action_steps.map((step, i) => (
-                        <div key={i} className="flex items-start gap-1.5 text-[11px] text-text-tertiary">
-                            <ChevronRight className="w-2.5 h-2.5 mt-0.5 shrink-0" style={{ color: '#ff8c42' }} />
-                            <span>{step}</span>
+                    <div>
+                        <div style={{ fontSize: '11px', fontWeight: 700, letterSpacing: '0.14em', textTransform: 'uppercase', color: '#7c6dfa' }}>
+                            {SOURCE_LABELS[source] || source}
                         </div>
+                        <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.3)', marginTop: '3px', fontWeight: 500 }}>
+                            {timeAgo(created_at)}
+                        </div>
+                    </div>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <span style={{
+                        fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.12em',
+                        padding: '6px 14px', borderRadius: '100px',
+                        background: 'rgba(255,255,255,0.04)', color: 'rgba(255,255,255,0.5)',
+                        border: '1px solid rgba(255,255,255,0.06)',
+                    }}>
+                        {category}
+                    </span>
+                    <span style={{
+                        width: '7px', height: '7px', borderRadius: '50%',
+                        background: status === 'error' ? '#ef4444' : '#22c55e',
+                        boxShadow: status === 'error' ? '0 0 8px rgba(239,68,68,0.5)' : '0 0 10px rgba(34,197,94,0.5)',
+                    }} />
+                </div>
+            </div>
+
+            {/* ── CONTENT ── */}
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                {/* Title / Summary */}
+                <h3 style={{
+                    fontSize: '17px', fontWeight: 500, lineHeight: 1.65,
+                    color: 'rgba(255,255,255,0.92)', margin: 0,
+                    display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden',
+                }}>
+                    {summary || title || 'Saved link'}
+                </h3>
+
+                {/* Hostname */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ width: '4px', height: '4px', borderRadius: '50%', background: 'rgba(124,109,250,0.5)' }} />
+                    <span style={{ fontSize: '12px', color: 'rgba(255,255,255,0.3)', fontWeight: 500 }}>
+                        {hostname}
+                    </span>
+                </div>
+
+                {/* Action Steps */}
+                {action_steps && action_steps.length > 0 && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', paddingLeft: '6px', borderLeft: '2px solid rgba(124,109,250,0.15)', marginTop: '4px' }}>
+                        {action_steps.slice(0, 2).map((step, i) => (
+                            <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', paddingLeft: '14px' }}>
+                                <ChevronRight style={{ width: '14px', height: '14px', marginTop: '2px', color: 'rgba(124,109,250,0.6)', flexShrink: 0 }} />
+                                <span style={{ fontSize: '12px', color: 'rgba(255,255,255,0.55)', lineHeight: 1.6 }}>{step}</span>
+                            </div>
+                        ))}
+                    </div>
+                )}
+
+                {/* Dossier */}
+                {dossier && (
+                    <div style={{
+                        padding: '16px', borderRadius: '16px',
+                        background: 'rgba(124,109,250,0.06)', border: '1px solid rgba(124,109,250,0.12)',
+                    }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px', color: '#a78bfa', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+                            <Sparkles style={{ width: '12px', height: '12px' }} /> Deep Dive
+                        </div>
+                        <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.6)', lineHeight: 1.6, margin: 0, display: '-webkit-box', WebkitLineClamp: 4, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                            {dossier}
+                        </p>
+                    </div>
+                )}
+
+                {/* Error */}
+                {status === 'error' && error_msg && (
+                    <div style={{ padding: '12px 16px', borderRadius: '12px', background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.15)', color: '#fca5a5', fontSize: '12px' }}>
+                        ⚠️ {error_msg}
+                        <button onClick={handleRetry} style={{ marginLeft: '10px', textDecoration: 'underline', cursor: 'pointer', background: 'none', border: 'none', color: 'inherit', fontWeight: 600 }}>Retry</button>
+                    </div>
+                )}
+
+                {/* Tags */}
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', marginTop: '4px' }}>
+                    {tags && tags.slice(0, 3).map((tag, i) => (
+                        tag !== 'predicted' && (
+                            <span key={i} style={{
+                                fontSize: '11px', fontWeight: 500,
+                                padding: '5px 14px', borderRadius: '100px',
+                                background: 'rgba(167,139,250,0.08)', color: 'rgba(167,139,250,0.7)',
+                                border: '1px solid rgba(167,139,250,0.12)',
+                            }}>
+                                #{tag}
+                            </span>
+                        )
                     ))}
                 </div>
-            )}
+            </div>
 
-            {/* Error message */}
-            {status === 'error' && error_msg && (
-                <div className="text-[11px] text-red bg-red-muted rounded px-2 py-1">
-                    Error: {error_msg.slice(0, 80)}
-                    {!retrying && (
-                        <button onClick={handleRetry} className="ml-2 underline hover:no-underline">
-                            Retry
+            {/* ── FOOTER ── */}
+            <div style={{
+                marginTop: '28px', paddingTop: '20px',
+                borderTop: '1px solid rgba(255,255,255,0.04)',
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '16px',
+            }}>
+                {/* Note */}
+                <div style={{ flex: 1, minWidth: 0 }}>
+                    {editing ? (
+                        <div style={{ display: 'flex', gap: '8px', alignItems: 'center', background: 'rgba(255,255,255,0.04)', padding: '6px 8px', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.08)' }}>
+                            <input
+                                ref={inputRef}
+                                type="text"
+                                value={noteText}
+                                onChange={e => setNoteText(e.target.value)}
+                                onKeyDown={e => {
+                                    if (e.key === 'Enter') saveNote()
+                                    if (e.key === 'Escape') { setEditing(false); setNoteText(note || '') }
+                                }}
+                                onBlur={saveNote}
+                                style={{ flex: 1, background: 'transparent', border: 'none', fontSize: '12px', color: '#fff', outline: 'none', height: '28px', fontFamily: 'inherit' }}
+                                placeholder="Type a note..."
+                            />
+                            <button onClick={saveNote} style={{ padding: '4px', borderRadius: '6px', background: 'none', border: 'none', color: '#22c55e', cursor: 'pointer' }}>
+                                <Check style={{ width: '14px', height: '14px' }} />
+                            </button>
+                        </div>
+                    ) : note ? (
+                        <div
+                            onClick={() => setEditing(true)}
+                            style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', padding: '6px 10px', borderRadius: '10px', marginLeft: '-10px' }}
+                            onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.04)'}
+                            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                        >
+                            <Pencil style={{ width: '13px', height: '13px', color: 'rgba(255,255,255,0.2)', flexShrink: 0 }} />
+                            <span style={{ fontSize: '12px', color: 'rgba(255,255,255,0.45)', fontStyle: 'italic', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                "{note}"
+                            </span>
+                        </div>
+                    ) : (
+                        <button
+                            onClick={() => setEditing(true)}
+                            style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', fontWeight: 500, color: 'rgba(255,255,255,0.2)', background: 'none', border: 'none', cursor: 'pointer', padding: '6px 0', fontFamily: 'inherit' }}
+                            onMouseEnter={e => e.currentTarget.style.color = '#7c6dfa'}
+                            onMouseLeave={e => e.currentTarget.style.color = 'rgba(255,255,255,0.2)'}
+                        >
+                            <Pencil style={{ width: '13px', height: '13px' }} /> Add note
                         </button>
                     )}
                 </div>
-            )}
 
-            {/* User note (editable) */}
-            {editing ? (
-                <div className="flex gap-1.5 items-center">
-                    <input
-                        ref={inputRef}
-                        type="text"
-                        value={noteText}
-                        onChange={e => setNoteText(e.target.value)}
-                        onKeyDown={e => { if (e.key === 'Enter') saveNote(); if (e.key === 'Escape') { setEditing(false); setNoteText(note || '') } }}
-                        onBlur={saveNote}
-                        className="flex-1 bg-bg-elevated border border-border rounded px-2 py-1 text-[12px] text-text outline-none focus:border-accent"
-                        placeholder="Add a note..."
-                    />
-                    <button onClick={saveNote} className="text-green"><Check className="w-3.5 h-3.5" /></button>
-                    <button onClick={() => { setEditing(false); setNoteText(note || '') }} className="text-text-tertiary"><X className="w-3.5 h-3.5" /></button>
-                </div>
-            ) : note ? (
-                <div className="note-block cursor-pointer group/note" onClick={() => setEditing(true)}>
-                    <div className="flex items-center justify-between">
-                        <span>"{note}"</span>
-                        <Pencil className="w-2.5 h-2.5 opacity-0 group-hover/note:opacity-100 text-text-tertiary transition-opacity" />
-                    </div>
-                </div>
-            ) : (
-                <button
-                    onClick={() => setEditing(true)}
-                    className="text-[11px] text-text-tertiary hover:text-text-secondary transition-colors text-left"
-                >
-                    + Add a note
-                </button>
-            )}
-
-            {/* Tags */}
-            {tags && tags.length > 0 && (
-                <div className="flex flex-wrap gap-1">
-                    {tags.map((tag, i) => (
-                        <span key={i} className="tag">{tag}</span>
+                {/* Action Buttons */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    {[
+                        { icon: Sparkles, onClick: handleResearch, title: 'Research', hoverBg: 'rgba(124,109,250,0.12)', hoverColor: '#7c6dfa', loading: researching },
+                        { icon: Share2, onClick: handleShare, title: 'Copy Link', hoverBg: 'rgba(255,255,255,0.06)', hoverColor: '#fff' },
+                        { icon: ArrowUpRight, onClick: () => window.open(url, '_blank'), title: 'Open', hoverBg: 'rgba(255,255,255,0.06)', hoverColor: '#fff' },
+                        { icon: Trash2, onClick: handleDelete, title: 'Delete', hoverBg: 'rgba(239,68,68,0.1)', hoverColor: '#f87171' },
+                    ].map(({ icon: Icon, onClick, title: t, hoverBg, hoverColor, loading: ld }, i) => (
+                        <button
+                            key={i}
+                            onClick={onClick}
+                            title={t}
+                            disabled={ld}
+                            style={{
+                                padding: '8px', borderRadius: '10px', background: 'none', border: 'none',
+                                color: 'rgba(255,255,255,0.18)', cursor: 'pointer',
+                                transition: 'all 0.2s', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            }}
+                            onMouseEnter={e => { e.currentTarget.style.background = hoverBg; e.currentTarget.style.color = hoverColor; e.currentTarget.style.transform = 'scale(1.1)' }}
+                            onMouseLeave={e => { e.currentTarget.style.background = 'none'; e.currentTarget.style.color = 'rgba(255,255,255,0.18)'; e.currentTarget.style.transform = 'scale(1)' }}
+                        >
+                            {ld ? <Loader2 style={{ width: '16px', height: '16px', animation: 'spin 1s linear infinite' }} /> : <Icon style={{ width: '16px', height: '16px' }} />}
+                        </button>
                     ))}
                 </div>
-            )}
-
-            {/* Open link — bottom */}
-            <div className="pt-1 mt-auto">
-                <a
-                    href={url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="link group/link"
-                >
-                    <span className="truncate max-w-[200px] inline-block align-bottom">
-                        {title || (() => { try { return new URL(url).hostname.replace('www.', '') } catch { return url } })()}
-                    </span>
-                    <ArrowUpRight className="w-3 h-3 opacity-0 group-hover/link:opacity-100 transition-opacity" />
-                </a>
             </div>
+
+            {/* Predicted indicator */}
+            {isPredicted && (
+                <div style={{ position: 'absolute', top: '-4px', right: '-4px' }}>
+                    <span style={{ position: 'relative', display: 'flex', width: '12px', height: '12px' }}>
+                        <span style={{ position: 'absolute', display: 'inline-flex', width: '100%', height: '100%', borderRadius: '50%', background: '#22c55e', opacity: 0.7, animation: 'ping 1s cubic-bezier(0,0,0.2,1) infinite' }} />
+                        <span style={{ position: 'relative', display: 'inline-flex', width: '12px', height: '12px', borderRadius: '50%', background: '#22c55e' }} />
+                    </span>
+                </div>
+            )}
         </div>
     )
 }

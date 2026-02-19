@@ -45,6 +45,12 @@ serve(async (req) => {
             }),
         })
 
+        if (!response.ok) {
+            const errorText = await response.text()
+            console.error('OpenAI API Error:', errorText)
+            throw new Error(`OpenAI API Error: ${response.statusText} ${errorText}`)
+        }
+
         const data = await response.json()
         const dossier = data.choices[0].message.content
 

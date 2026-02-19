@@ -254,12 +254,12 @@ export default function LandingPage({ onEnterDashboard }) {
                     whileInView={{ opacity: 1, scale: 1 }}
                     viewport={{ once: true }}
                 >
-                    <Bookmark className="w-8 h-8 mx-auto mb-4" style={{ color: '#ff8c42' }} />
-                    <h2 className="text-[22px] font-bold mb-2">Ready to save smarter?</h2>
-                    <p className="text-[14px] text-text-tertiary mb-6 max-w-md mx-auto">
+                    <Bookmark style={{ width: '36px', height: '36px', color: '#ff8c42', marginBottom: '16px' }} />
+                    <h2 style={{ fontSize: '26px', fontWeight: 800, letterSpacing: '-0.02em', color: '#fff', marginBottom: '10px' }}>Ready to save smarter?</h2>
+                    <p style={{ fontSize: '15px', color: 'var(--color-text-tertiary)', marginBottom: '28px', maxWidth: '420px', lineHeight: 1.6 }}>
                         Stop losing links in chat history. Start building your personal knowledge base.
                     </p>
-                    <button onClick={onEnterDashboard} className="landing-cta-primary mx-auto">
+                    <button onClick={onEnterDashboard} className="landing-cta-primary">
                         <Zap className="w-4 h-4" />
                         Launch Dashboard
                         <ArrowRight className="w-4 h-4" />

@@ -6,7 +6,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { DOMParser } from "https://deno.land/x/deno_dom@v0.1.38/deno-dom-wasm.ts";
 import { Readability } from "https://esm.sh/@mozilla/readability@0.4.4";
-import { YoutubeTranscript } from "https://esm.sh/youtube-transcript@3.0.1";
+import { YoutubeTranscript } from "https://esm.sh/youtube-transcript";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;

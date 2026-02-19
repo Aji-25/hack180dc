@@ -24,6 +24,7 @@ serve(async (req) => {
         if (!query) throw new Error('Query required')
 
         // 1. Generate Embedding for Query
+        // 1. Generate Embedding for Query
         const embeddingRes = await fetch('https://api.openai.com/v1/embeddings', {
             method: 'POST',
             headers: {
@@ -35,6 +36,13 @@ serve(async (req) => {
                 input: query,
             }),
         })
+
+        if (!embeddingRes.ok) {
+            const errorText = await embeddingRes.text()
+            console.error('OpenAI Embedding Error:', errorText)
+            throw new Error(`OpenAI API Error: ${embeddingRes.statusText} ${errorText}`)
+        }
+
         const embeddingData = await embeddingRes.json()
         const queryEmbedding = embeddingData.data[0].embedding
 

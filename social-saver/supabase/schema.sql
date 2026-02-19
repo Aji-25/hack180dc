@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS saves (
     created_at TIMESTAMPTZ DEFAULT now(),
     user_phone TEXT NOT NULL,
     url TEXT NOT NULL,
-    url_hash TEXT GENERATED ALWAYS AS (encode(sha256(url::bytea), 'hex')) STORED,
+    url_hash TEXT GENERATED ALWAYS AS (md5(url)) STORED,
     source TEXT DEFAULT 'other',
     title TEXT,
     note TEXT,
@@ -30,13 +30,22 @@ CREATE INDEX idx_saves_category ON saves (category);
 CREATE INDEX idx_saves_status ON saves (status);
 -- Full-text search (summary + title + note + tags combined)
 ALTER TABLE saves
-ADD COLUMN IF NOT EXISTS fts tsvector GENERATED ALWAYS AS (
-        to_tsvector(
-            'english',
-            coalesce(summary, '') || ' ' || coalesce(title, '') || ' ' || coalesce(note, '') || ' ' || coalesce(url, '') || ' ' || array_to_string(tags, ' ')
-        )
-    ) STORED;
-CREATE INDEX idx_saves_fts ON saves USING GIN (fts);
+ADD COLUMN IF NOT EXISTS fts tsvector;
+-- Create function to update fts
+CREATE OR REPLACE FUNCTION handle_new_save() RETURNS trigger AS $$ BEGIN NEW.fts := to_tsvector(
+        'english',
+        coalesce(NEW.summary, '') || ' ' || coalesce(NEW.title, '') || ' ' || coalesce(NEW.note, '') || ' ' || coalesce(NEW.url, '') || ' ' || array_to_string(NEW.tags, ' ')
+    );
+RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+-- Create trigger to invoke the function
+DROP TRIGGER IF EXISTS on_save_created ON saves;
+CREATE TRIGGER on_save_created BEFORE
+INSERT
+    OR
+UPDATE ON saves FOR EACH ROW EXECUTE PROCEDURE handle_new_save();
+CREATE INDEX IF NOT EXISTS idx_saves_fts ON saves USING GIN (fts);
 -- Row Level Security
 ALTER TABLE saves ENABLE ROW LEVEL SECURITY;
 -- Policy: allow reads only for matching user_phone via query param

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { RefreshCw, Database, Bell, Check, X, Loader2, ArrowRight, Sparkles } from 'lucide-react'
+import { RefreshCw, Database, Bell, Check, X, Loader2, ArrowRight, Sparkles, Settings } from 'lucide-react'
 import { useToast } from './Toast'
 
 export default function SyncModal({ userPhone }) {
@@ -104,77 +104,97 @@ export default function SyncModal({ userPhone }) {
         <>
             <button
                 onClick={() => setOpen(true)}
-                className="btn btn-ghost"
+                className="flex items-center gap-2 px-3 py-2 rounded-xl text-text-tertiary hover:text-white hover:bg-white/5 transition-all text-[13px]"
                 title="Sync & Tools"
             >
-                <RefreshCw className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">Sync</span>
+                <Settings className="w-4 h-4" />
+                <span className="hidden sm:inline">Settings</span>
             </button>
 
             {open && (
-                <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" onClick={() => setOpen(false)}>
-                    <div className="bg-[#191918] border border-border rounded-xl w-full max-w-md overflow-hidden shadow-2xl" onClick={e => e.stopPropagation()}>
-                        <div className="p-4 border-b border-border flex items-center justify-between bg-bg-raised">
-                            <h3 className="font-semibold text-[14px] flex items-center gap-2">
-                                <RefreshCw className="w-4 h-4 text-accent" />
-                                Sync & Automations
-                            </h3>
-                            <button onClick={() => setOpen(false)} className="text-text-tertiary hover:text-text">
+                <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+                    <div
+                        className="absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity"
+                        onClick={() => setOpen(false)}
+                    />
+
+                    <div
+                        className="relative w-full max-w-md bg-[#0F1115]/90 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl shadow-accent-primary/5 overflow-hidden transform transition-all scale-100 opacity-100"
+                        onClick={e => e.stopPropagation()}
+                    >
+                        {/* Decorative background gradients */}
+                        <div className="absolute top-0 right-0 w-64 h-64 bg-accent-primary/5 rounded-full blur-[80px] -translate-y-1/2 translate-x-1/2 pointer-events-none" />
+                        <div className="absolute bottom-0 left-0 w-48 h-48 bg-accent-secondary/5 rounded-full blur-[60px] translate-y-1/2 -translate-x-1/2 pointer-events-none" />
+
+                        {/* Header */}
+                        <div className="flex items-center justify-between p-5 border-b border-white/5 relative z-10">
+                            <div className="flex items-center gap-2">
+                                <Settings className="w-4 h-4 text-accent-primary" />
+                                <span className="text-[14px] font-semibold text-white">Sync & Tools</span>
+                            </div>
+                            <button
+                                onClick={() => setOpen(false)}
+                                className="p-2 -mr-2 rounded-lg hover:bg-white/5 text-text-tertiary hover:text-white transition-colors"
+                            >
                                 <X className="w-4 h-4" />
                             </button>
                         </div>
 
-                        <div className="p-5 space-y-6">
+                        <div className="p-6 space-y-8 relative z-10 max-h-[80vh] overflow-y-auto custom-scrollbar">
                             {/* Notion Section */}
-                            <div className="space-y-3">
-                                <div className="flex items-center gap-2 text-[13px] font-medium text-text">
-                                    <Database className="w-3.5 h-3.5" />
+                            <div className="space-y-4">
+                                <div className="flex items-center gap-2 text-[13px] font-medium text-white">
+                                    <div className="w-6 h-6 rounded bg-white/5 flex items-center justify-center border border-white/10">
+                                        <Database className="w-3.5 h-3.5 text-text-secondary" />
+                                    </div>
                                     Notion Sync
                                 </div>
-                                <div className="space-y-2">
+                                <div className="space-y-3 pl-8">
                                     <input
                                         type="password"
                                         value={notionKey}
                                         onChange={e => setNotionKey(e.target.value)}
-                                        placeholder="Notion Integration Token (secret_...)"
-                                        className="w-full bg-bg-elevated border border-border rounded px-3 py-2 text-[12px] text-text outline-none focus:border-accent transition-colors"
+                                        placeholder="Integration Token (secret_...)"
+                                        className="w-full bg-black/20 border border-white/10 rounded-lg px-3 py-2.5 text-[12px] text-white placeholder-text-tertiary focus:border-accent-primary/50 focus:ring-1 focus:ring-accent-primary/50 transition-all outline-none"
                                     />
                                     <input
                                         type="text"
                                         value={dbId}
                                         onChange={e => setDbId(e.target.value)}
                                         placeholder="Database ID"
-                                        className="w-full bg-bg-elevated border border-border rounded px-3 py-2 text-[12px] text-text outline-none focus:border-accent transition-colors"
+                                        className="w-full bg-black/20 border border-white/10 rounded-lg px-3 py-2.5 text-[12px] text-white placeholder-text-tertiary focus:border-accent-primary/50 focus:ring-1 focus:ring-accent-primary/50 transition-all outline-none"
                                     />
                                     <button
                                         onClick={handleSync}
                                         disabled={syncing || !notionKey || !dbId}
-                                        className="w-full btn btn-primary py-2 text-[12px] justify-center"
+                                        className="w-full btn btn-primary py-2.5 text-[12px] justify-center shadow-lg shadow-accent-primary/10"
                                     >
                                         {syncing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : 'Export Last 10 Saves'}
                                     </button>
+                                    <p className="text-[10px] text-text-tertiary leading-relaxed px-1">
+                                        Requires a Notion Integration with access to the database. properties: Name, URL, Category, Tags, Summary.
+                                    </p>
                                 </div>
-                                <p className="text-[10px] text-text-tertiary leading-relaxed">
-                                    Requires a Notion Integration with access to the database. properties: Name, URL, Category, Tags, Summary.
-                                </p>
                             </div>
 
-                            <div className="h-px bg-border-subtle" />
+                            <div className="h-px bg-white/5" />
 
                             {/* Spaced Repetition Section */}
                             <div className="space-y-3">
-                                <div className="flex items-center gap-2 text-[13px] font-medium text-text">
-                                    <Bell className="w-3.5 h-3.5" />
-                                    Spaced Repetition (WhatsApp)
+                                <div className="flex items-center gap-2 text-[13px] font-medium text-white">
+                                    <div className="w-6 h-6 rounded bg-white/5 flex items-center justify-center border border-white/10">
+                                        <Bell className="w-3.5 h-3.5 text-text-secondary" />
+                                    </div>
+                                    Spaced Repetition
                                 </div>
-                                <div className="flex items-center justify-between p-3 bg-bg-elevated rounded-lg border border-border-subtle">
-                                    <div className="text-[11px] text-text-secondary">
-                                        Trigger a "3 days ago" reminder check manually.
+                                <div className="flex items-center justify-between p-4 bg-white/[0.02] rounded-xl border border-white/5 hover:bg-white/[0.04] transition-colors ml-8">
+                                    <div className="text-[11px] text-text-secondary pr-4">
+                                        Trigger a "3 days ago" reminder check on WhatsApp.
                                     </div>
                                     <button
                                         onClick={handleRemind}
                                         disabled={reminding}
-                                        className="btn btn-ghost hover:bg-accent/10 hover:text-accent border border-border h-8 w-8 p-0 flex items-center justify-center rounded-lg"
+                                        className="h-8 w-8 flex items-center justify-center rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-white transition-all shrink-0"
                                         title="Simulate Reminder"
                                     >
                                         {reminding ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ArrowRight className="w-3.5 h-3.5" />}
@@ -182,19 +202,22 @@ export default function SyncModal({ userPhone }) {
                                 </div>
                             </div>
 
-                            <div className="h-px bg-border-subtle" />
+                            <div className="h-px bg-white/5" />
 
                             {/* Predictive Context Section */}
                             <div className="space-y-3">
-                                <div className="flex items-center gap-2 text-[13px] font-medium text-text">
-                                    <Sparkles className="w-3.5 h-3.5" />
-                                    Predictive Context (Beta)
+                                <div className="flex items-center gap-2 text-[13px] font-medium text-white">
+                                    <div className="w-6 h-6 rounded bg-white/5 flex items-center justify-center border border-white/10">
+                                        <Sparkles className="w-3.5 h-3.5 text-accent-secondary" />
+                                    </div>
+                                    Predictive Context
+                                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-accent-secondary/10 text-accent-secondary border border-accent-secondary/20">BETA</span>
                                 </div>
-                                <div className="flex items-center justify-between p-3 bg-bg-elevated rounded-lg border border-border-subtle">
-                                    <div className="text-[11px] text-text-secondary">
+                                <div className="flex items-center justify-between p-4 bg-white/[0.02] rounded-xl border border-white/5 hover:bg-white/[0.04] transition-colors ml-8">
+                                    <div className="text-[11px] text-text-secondary pr-4">
                                         Anticipate needs (e.g., Save flight → Get hotel suggestions).
                                     </div>
-                                    <label className="relative inline-flex items-center cursor-pointer">
+                                    <label className="relative inline-flex items-center cursor-pointer shrink-0">
                                         <input
                                             type="checkbox"
                                             className="sr-only peer"
@@ -204,7 +227,7 @@ export default function SyncModal({ userPhone }) {
                                                 localStorage.setItem('predictive_mode', e.target.checked)
                                             }}
                                         />
-                                        <div className="w-9 h-5 bg-border rounded-full peer peer-focus:ring-2 peer-focus:ring-accent/20 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-accent"></div>
+                                        <div className="w-9 h-5 bg-white/10 rounded-full peer peer-focus:ring-2 peer-focus:ring-accent-primary/20 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-accent-primary border border-white/5"></div>
                                     </label>
                                 </div>
                             </div>

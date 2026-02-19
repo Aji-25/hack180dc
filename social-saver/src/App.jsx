@@ -262,115 +262,130 @@ function App() {
     return (
         <div className="min-h-screen flex flex-col">
             <OnboardingOverlay />
-            <Header totalSaves={stats.total} stats={stats} userPhone={userPhone} />
+            <Header totalSaves={stats.total} stats={stats} userPhone={userPhone} onLogoClick={() => setShowLanding(true)} />
 
-            <main className="flex-1 max-w-5xl w-full mx-auto px-5 py-6">
-                {/* Ask My Saves */}
-                <AskSaves saves={useMock ? MOCK_SAVES : saves} onFilterResults={setAskResults} />
+            <main className="flex-1 w-full">
+                <div style={{ maxWidth: '1152px', margin: '0 auto', padding: '40px 24px' }}>
+                    {/* Ask My Saves */}
+                    <AskSaves saves={useMock ? MOCK_SAVES : saves} onFilterResults={setAskResults} />
 
-                {/* Controls */}
-                <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center mb-4">
-                    <div className="flex-1 w-full">
-                        <SearchBar value={search} onChange={setSearch} suggestions={searchSuggestions} />
+                    {/* Section divider */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '16px', margin: '48px 0' }}>
+                        <div style={{ flex: 1, height: '1px', background: 'rgba(255,255,255,0.08)' }} />
+                        <span style={{
+                            fontSize: '13px',
+                            color: 'var(--color-text-secondary)',
+                            letterSpacing: '0.1em',
+                            textTransform: 'uppercase',
+                            fontWeight: 700,
+                        }}>Your Saves</span>
+                        <div style={{ flex: 1, height: '1px', background: 'rgba(255,255,255,0.08)' }} />
                     </div>
-                    <div className="flex items-center gap-2">
-                        <RecapModal userPhone={userPhone} useMock={useMock} />
-                        <RandomInspiration userPhone={userPhone} />
-                    </div>
-                </div>
 
-                {/* Quick Filters + View Toggle */}
-                <div className="flex items-center justify-between mb-4 gap-3">
-                    <div className="flex-1 min-w-0">
-                        <QuickFilters active={quickFilters} onToggle={toggleQuickFilter} />
+                    {/* Controls */}
+                    <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center mb-5">
+                        <div className="flex-1 w-full">
+                            <SearchBar value={search} onChange={setSearch} suggestions={searchSuggestions} />
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <RecapModal userPhone={userPhone} useMock={useMock} />
+                            <RandomInspiration userPhone={userPhone} />
+                        </div>
                     </div>
-                    <div className="view-toggle shrink-0">
-                        <button
-                            onClick={() => setViewMode('grid')}
-                            className={viewMode === 'grid' ? 'active' : ''}
-                            title="Grid view"
-                        >
-                            <LayoutGrid className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                            onClick={() => setViewMode('collections')}
-                            className={viewMode === 'collections' ? 'active' : ''}
-                            title="Collections"
-                        >
-                            <Layers className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                            onClick={() => setViewMode('graph')}
-                            className={viewMode === 'graph' ? 'active' : ''}
-                            title="Knowledge Graph (Beta)"
-                        >
-                            <Network className="w-3.5 h-3.5" />
-                        </button>
-                    </div>
-                </div>
 
-                {/* Category Chips */}
-                <div className="mb-6">
-                    <CategoryChips selected={category} onSelect={setCategory} counts={stats.categories} />
-                </div>
-
-                {/* Content */}
-                {loading ? (
-                    <div className="saves-grid">
-                        {[...Array(6)].map((_, i) => (
-                            <div key={i} className="p-4 flex flex-col gap-3">
-                                <div className="skel h-3 w-16" />
-                                <div className="skel h-4 w-20" />
-                                <div className="skel h-3 w-full" />
-                                <div className="skel h-3 w-3/4" />
-                                <div className="flex gap-1.5 mt-auto pt-1">
-                                    <div className="skel h-5 w-12 rounded" />
-                                    <div className="skel h-5 w-14 rounded" />
-                                </div>
-                            </div>
-                        ))}
-                    </div>
-                ) : displaySaves.length > 0 ? (
-                    <>
-                        {viewMode === 'graph' ? (
-                            <KnowledgeGraph saves={displaySaves} />
-                        ) : viewMode === 'collections' ? (
-                            <CollectionsView saves={displaySaves} onDelete={handleDelete} onUpdate={handleUpdate} />
-                        ) : (
-                            <div className="saves-grid">
-                                {displaySaves.map(save => (
-                                    <SaveCard key={save.id} save={save} onDelete={handleDelete} onUpdate={handleUpdate} />
-                                ))}
-                            </div>
-                        )}
-
-                        {/* Export */}
-                        <div className="flex justify-end mt-4">
-                            <button onClick={exportCSV} className="btn btn-ghost text-[11px]">
-                                <Download className="w-3 h-3" />
-                                Export CSV
+                    {/* Quick Filters + View Toggle */}
+                    <div className="flex items-center justify-between mb-6 gap-3">
+                        <div className="flex-1 min-w-0">
+                            <QuickFilters active={quickFilters} onToggle={toggleQuickFilter} />
+                        </div>
+                        <div className="view-toggle shrink-0">
+                            <button
+                                onClick={() => setViewMode('grid')}
+                                className={viewMode === 'grid' ? 'active' : ''}
+                                title="Grid view"
+                            >
+                                <LayoutGrid className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                                onClick={() => setViewMode('collections')}
+                                className={viewMode === 'collections' ? 'active' : ''}
+                                title="Collections"
+                            >
+                                <Layers className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                                onClick={() => setViewMode('graph')}
+                                className={viewMode === 'graph' ? 'active' : ''}
+                                title="Knowledge Graph (Beta)"
+                            >
+                                <Network className="w-3.5 h-3.5" />
                             </button>
                         </div>
-                    </>
-                ) : (
-                    <EmptyState search={search} category={category} />
-                )}
+                    </div>
+
+                    {/* Category Chips */}
+                    <div style={{ marginBottom: '32px' }}>
+                        <CategoryChips selected={category} onSelect={setCategory} counts={stats.categories} />
+                    </div>
+
+                    {/* Content */}
+                    {loading ? (
+                        <div className="saves-grid">
+                            {[...Array(6)].map((_, i) => (
+                                <div key={i} className="card p-5 flex flex-col gap-3" style={{ minHeight: '200px' }}>
+                                    <div className="flex items-center gap-2">
+                                        <div className="skel h-3 w-14 rounded-full" />
+                                        <div className="skel h-2 w-2 rounded-full" />
+                                    </div>
+                                    <div className="skel h-5 w-20 rounded-full" />
+                                    <div className="skel h-3 w-full rounded" />
+                                    <div className="skel h-3 w-4/5 rounded" />
+                                    <div className="skel h-3 w-3/5 rounded" />
+                                    <div className="flex gap-1.5 mt-auto pt-2">
+                                        <div className="skel h-4 w-12 rounded-full" />
+                                        <div className="skel h-4 w-16 rounded-full" />
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    ) : displaySaves.length > 0 ? (
+                        <>
+                            {viewMode === 'graph' ? (
+                                <KnowledgeGraph saves={displaySaves} />
+                            ) : viewMode === 'collections' ? (
+                                <CollectionsView saves={displaySaves} onDelete={handleDelete} onUpdate={handleUpdate} />
+                            ) : (
+                                <div className="saves-grid">
+                                    {displaySaves.map(save => (
+                                        <SaveCard key={save.id} save={save} onDelete={handleDelete} onUpdate={handleUpdate} />
+                                    ))}
+                                </div>
+                            )}
+
+                            {/* Export */}
+                            <div className="flex justify-end mt-6">
+                                <button onClick={exportCSV} className="btn btn-ghost text-[12px]" style={{ gap: '6px' }}>
+                                    <Download className="w-3.5 h-3.5" />
+                                    Export CSV
+                                </button>
+                            </div>
+                        </>
+                    ) : (
+                        <EmptyState search={search} category={category} />
+                    )}
+                </div>
             </main>
 
             {/* Footer */}
-            <footer className="border-t border-border-subtle">
-                <div className="max-w-5xl mx-auto px-5 py-4 flex items-center justify-between">
-                    <span className="footer-text">
-                        Social Saver Bot — save links via WhatsApp
-                    </span>
-                    <div className="flex items-center gap-4">
-                        <span className="footer-text opacity-50">
-                            We store links + metadata only. Your data, your control.
+            <footer style={{ borderTop: '1px solid var(--color-border-subtle)', marginTop: '24px' }}>
+                <div style={{ maxWidth: '1152px', margin: '0 auto', padding: '16px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <div className="flex items-center gap-2">
+                        <span style={{ fontSize: '12px', fontWeight: 700, letterSpacing: '-0.01em', background: 'linear-gradient(135deg, #7c6dfa, #f472b6)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
+                            Social Saver
                         </span>
-                        <span className="footer-text">
-                            Built for Hack180
-                        </span>
+                        <span className="footer-text opacity-50">— save links via WhatsApp</span>
                     </div>
+                    <span className="footer-text" style={{ opacity: 0.4 }}>Built for Hack180 ✦</span>
                 </div>
             </footer>
         </div>

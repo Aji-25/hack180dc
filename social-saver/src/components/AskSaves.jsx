@@ -1,9 +1,9 @@
 import { useState, useRef, useEffect } from 'react'
-import { MessageSquare, Search, X, ArrowRight, Loader2, Sparkles, Brain, ArrowUpRight } from 'lucide-react'
+import { X, ArrowRight, Loader2, Sparkles, ArrowUpRight } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { marked } from 'marked'
 
-export default function AskSaves({ saves }) { // saves prop is ignored now, as we use RAG
+export default function AskSaves({ saves }) {
     const [query, setQuery] = useState('')
     const [loading, setLoading] = useState(false)
     const [aiReply, setAiReply] = useState(null)
@@ -18,8 +18,37 @@ export default function AskSaves({ saves }) { // saves prop is ignored now, as w
         setAiReply(null)
         setReferences(null)
 
+        const edgeFnUrl = import.meta.env.VITE_EDGE_FUNCTION_URL || ''
+
+        // If no edge function URL is configured, do client-side search
+        if (!edgeFnUrl) {
+            const q = query.toLowerCase()
+            const matches = saves.filter(s => {
+                const text = [
+                    s.title, s.summary, s.category, s.note,
+                    ...(s.tags || []),
+                    ...(s.action_steps || []),
+                ].filter(Boolean).join(' ').toLowerCase()
+                return text.includes(q) || q.split(/\s+/).some(w => w.length > 2 && text.includes(w))
+            })
+
+            if (matches.length > 0) {
+                const lines = matches.map(m => {
+                    const title = m.title || 'Untitled'
+                    const summary = m.summary || ''
+                    const tags = (m.tags || []).map(t => `\`#${t}\``).join(' ')
+                    return `**${title}** — ${summary}${tags ? `\n${tags}` : ''}`
+                })
+                setAiReply(`Found **${matches.length}** matching save${matches.length > 1 ? 's' : ''}:\n\n${lines.join('\n\n')}`)
+                setReferences(matches.map(m => ({ id: m.id, url: m.url, title: m.title || m.summary })))
+            } else {
+                setAiReply(`No saves matching **"${query}"**. Try searching for a category like "fitness" or a tag like "recipe".`)
+            }
+            setLoading(false)
+            return
+        }
+
         try {
-            const edgeFnUrl = import.meta.env.VITE_EDGE_FUNCTION_URL || ''
             const res = await fetch(`${edgeFnUrl}/chat-brain`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -41,92 +70,187 @@ export default function AskSaves({ saves }) { // saves prop is ignored now, as w
     }
 
     return (
-        <div className="w-full max-w-2xl mx-auto mb-8">
-            <div className="relative group">
-                <div className="absolute -inset-0.5 bg-gradient-to-r from-accent/50 to-purple-500/50 rounded-xl blur opacity-30 group-hover:opacity-60 transition duration-500"></div>
-                <div className="relative bg-bg-card border border-border/50 rounded-xl p-1 flex items-center shadow-2xl">
-                    <div className="pl-3 pr-2 text-accent">
-                        {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Brain className="w-5 h-5" />}
-                    </div>
-                    <form onSubmit={handleSearch} className="flex-1 flex items-center">
+        <div className="w-full">
+            {/* Input */}
+            <div style={{ position: 'relative' }}>
+                {/* Glow behind */}
+                <div style={{
+                    position: 'absolute',
+                    inset: '-2px',
+                    borderRadius: '18px',
+                    background: 'linear-gradient(135deg, rgba(124,109,250,0.4), rgba(244,114,182,0.3))',
+                    filter: 'blur(12px)',
+                    opacity: 0.6,
+                    zIndex: 0,
+                    pointerEvents: 'none'
+                }} />
+                <div style={{
+                    position: 'relative',
+                    zIndex: 1,
+                    display: 'flex',
+                    alignItems: 'center',
+                    background: 'rgba(13,13,22,0.97)',
+                    border: '1px solid rgba(124,109,250,0.3)',
+                    borderRadius: '20px',
+                    padding: '8px 8px 8px 20px',
+                    gap: '12px',
+                    boxShadow: '0 12px 40px rgba(0,0,0,0.5)',
+                    backdropFilter: 'blur(20px)',
+                }}>
+                    <span style={{ fontSize: '18px', lineHeight: 1 }}>
+                        {loading ? '⏳' : '🧠'}
+                    </span>
+                    <form onSubmit={handleSearch} style={{ flex: 1, display: 'flex', alignItems: 'center', gap: '8px' }}>
                         <input
                             ref={inputRef}
                             type="text"
                             value={query}
                             onChange={(e) => setQuery(e.target.value)}
-                            placeholder="Ask your second brain..."
-                            className="w-full bg-transparent border-none outline-none text-[15px] placeholder:text-text-tertiary h-10 px-2 text-text"
+                            placeholder="Ask your second brain anything..."
+                            style={{
+                                flex: 1,
+                                background: 'transparent',
+                                border: 'none',
+                                outline: 'none',
+                                fontSize: '16px',
+                                color: 'var(--color-text)',
+                                height: '52px',
+                                fontFamily: 'inherit',
+                                letterSpacing: '-0.01em',
+                            }}
                         />
                         {query && (
                             <button
                                 type="button"
-                                onClick={() => setQuery('')}
-                                className="p-1.5 text-text-tertiary hover:text-text-secondary rounded-full hover:bg-bg-elevated transition-colors mr-1"
+                                onClick={() => { setQuery(''); setAiReply(null); setReferences(null); }}
+                                style={{
+                                    padding: '4px',
+                                    color: 'var(--color-text-tertiary)',
+                                    background: 'none',
+                                    border: 'none',
+                                    cursor: 'pointer',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                }}
                             >
-                                <X className="w-4 h-4" />
+                                <X style={{ width: '14px', height: '14px' }} />
                             </button>
                         )}
                         <button
                             type="submit"
                             disabled={!query.trim() || loading}
-                            className="bg-accent text-bg-base rounded-lg px-3 py-1.5 text-[13px] font-medium flex items-center gap-1.5 hover:bg-accent-hover disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                            style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '8px',
+                                padding: '12px 24px',
+                                borderRadius: '14px',
+                                background: 'linear-gradient(135deg, #7c6dfa, #a78bfa)',
+                                color: '#fff',
+                                fontSize: '15px',
+                                fontWeight: 700,
+                                border: 'none',
+                                cursor: query.trim() && !loading ? 'pointer' : 'not-allowed',
+                                opacity: !query.trim() || loading ? 0.5 : 1,
+                                transition: 'all 0.2s',
+                                boxShadow: '0 4px 16px rgba(124,109,250,0.45)',
+                                fontFamily: 'inherit',
+                                letterSpacing: '-0.01em',
+                                whiteSpace: 'nowrap',
+                            }}
                         >
-                            <span>Ask</span>
-                            <ArrowRight className="w-3.5 h-3.5" />
+                            {loading ? <Loader2 style={{ width: '14px', height: '14px', animation: 'spin 1s linear infinite' }} /> : <><span>Ask</span><ArrowRight style={{ width: '13px', height: '13px' }} /></>}
                         </button>
                     </form>
                 </div>
             </div>
 
+            {/* AI Reply */}
             <AnimatePresence>
                 {aiReply && (
                     <motion.div
                         initial={{ opacity: 0, y: 10 }}
                         animate={{ opacity: 1, y: 0 }}
                         exit={{ opacity: 0, y: -10 }}
-                        className="mt-4 p-5 bg-gradient-to-b from-bg-elevated to-bg-card rounded-xl border border-border/60 shadow-lg relative overflow-hidden"
+                        style={{ marginTop: '12px' }}
                     >
-                        <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-accent to-purple-500 alpha-50"></div>
-
-                        {/* Answer */}
-                        <div className="flex gap-3">
-                            <div className="mt-1 min-w-[24px]">
-                                <Sparkles className="w-5 h-5 text-purple-400" />
-                            </div>
-                            <div className="space-y-4 w-full">
-                                <div className="prose prose-invert prose-p:text-text-secondary prose-headings:text-text prose-strong:text-text prose-a:text-accent max-w-none text-[14px] leading-relaxed"
-                                    dangerouslySetInnerHTML={{ __html: marked(aiReply) }}
-                                />
-
-                                {/* References RAG */}
-                                {references && references.length > 0 && (
-                                    <div className="pt-4 mt-4 border-t border-border-subtle/50">
-                                        <div className="text-[11px] uppercase tracking-wider text-text-tertiary font-semibold mb-2">
-                                            Sources
-                                        </div>
-                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                                            {references.map((ref) => (
-                                                <a
-                                                    key={ref.id}
-                                                    href={ref.url}
-                                                    target="_blank"
-                                                    rel="noopener noreferrer"
-                                                    className="flex items-center gap-2 p-2 rounded bg-bg-base/50 hover:bg-bg-elevated border border-transparent hover:border-border-subtle transition-all group/ref text-left"
-                                                >
-                                                    <span className="text-[12px] text-text-secondary truncate flex-1 group-hover/ref:text-accent transition-colors">
-                                                        {ref.title || ref.summary}
-                                                    </span>
-                                                    <div className="flex items-center gap-1">
-                                                        <span className="text-[10px] text-text-tertiary bg-bg-raised px-1.5 py-0.5 rounded">
-                                                            {Math.round(ref.similarity * 100)}%
-                                                        </span>
-                                                        <ArrowUpRight className="w-3 h-3 text-text-tertiary opacity-0 group-hover/ref:opacity-100 transition-opacity" />
-                                                    </div>
-                                                </a>
-                                            ))}
-                                        </div>
+                        <div style={{
+                            background: 'rgba(13,13,22,0.95)',
+                            border: '1px solid rgba(124,109,250,0.2)',
+                            borderRadius: '16px',
+                            overflow: 'hidden',
+                            boxShadow: '0 16px 48px rgba(0,0,0,0.4)',
+                            backdropFilter: 'blur(16px)',
+                        }}>
+                            {/* Top accent line */}
+                            <div style={{
+                                height: '2px',
+                                background: 'linear-gradient(90deg, #7c6dfa, #f472b6)',
+                            }} />
+                            <div style={{ padding: '20px' }}>
+                                <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-start' }}>
+                                    <div style={{
+                                        width: '28px',
+                                        height: '28px',
+                                        borderRadius: '8px',
+                                        background: 'linear-gradient(135deg, rgba(124,109,250,0.2), rgba(244,114,182,0.15))',
+                                        border: '1px solid rgba(124,109,250,0.2)',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        flexShrink: 0,
+                                    }}>
+                                        <Sparkles style={{ width: '14px', height: '14px', color: '#a78bfa' }} />
                                     </div>
-                                )}
+                                    <div style={{ flex: 1 }}>
+                                        <div
+                                            style={{ fontSize: '14px', lineHeight: 1.6, color: 'var(--color-text-secondary)' }}
+                                            dangerouslySetInnerHTML={{ __html: marked(aiReply) }}
+                                        />
+
+                                        {references && references.length > 0 && (
+                                            <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid var(--color-border-subtle)' }}>
+                                                <div style={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--color-text-tertiary)', fontWeight: 700, marginBottom: '8px' }}>
+                                                    Sources
+                                                </div>
+                                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' }}>
+                                                    {references.map((ref) => (
+                                                        <a
+                                                            key={ref.id}
+                                                            href={ref.url}
+                                                            target="_blank"
+                                                            rel="noopener noreferrer"
+                                                            style={{
+                                                                display: 'flex',
+                                                                alignItems: 'center',
+                                                                gap: '8px',
+                                                                padding: '8px 10px',
+                                                                borderRadius: '10px',
+                                                                background: 'rgba(255,255,255,0.03)',
+                                                                border: '1px solid var(--color-border-subtle)',
+                                                                textDecoration: 'none',
+                                                                transition: 'all 0.15s',
+                                                            }}
+                                                            onMouseEnter={e => {
+                                                                e.currentTarget.style.borderColor = 'rgba(124,109,250,0.3)'
+                                                                e.currentTarget.style.background = 'rgba(124,109,250,0.07)'
+                                                            }}
+                                                            onMouseLeave={e => {
+                                                                e.currentTarget.style.borderColor = 'var(--color-border-subtle)'
+                                                                e.currentTarget.style.background = 'rgba(255,255,255,0.03)'
+                                                            }}
+                                                        >
+                                                            <span style={{ fontSize: '12px', color: 'var(--color-text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
+                                                                {ref.title || ref.summary}
+                                                            </span>
+                                                            <ArrowUpRight style={{ width: '12px', height: '12px', color: 'var(--color-text-tertiary)', flexShrink: 0 }} />
+                                                        </a>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </motion.div>
