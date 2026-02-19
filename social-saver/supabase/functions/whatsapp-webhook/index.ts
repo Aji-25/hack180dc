@@ -4,6 +4,9 @@
 // calls OpenAI for categorization, saves to Supabase, replies via TwiML.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { DOMParser } from "https://deno.land/x/deno_dom@v0.1.38/deno-dom-wasm.ts";
+import { Readability } from "https://esm.sh/@mozilla/readability@0.4.4";
+import { YoutubeTranscript } from "https://esm.sh/youtube-transcript@3.0.1";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -64,6 +67,63 @@ async function fetchMetadata(url: string): Promise<{ title: string; description:
         };
     } catch {
         return { title: "", description: "" };
+    }
+}
+
+function extractVideoId(url: string): string | null {
+    const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|&v=)([^#&?]*).*/;
+    const match = url.match(regExp);
+    return (match && match[2].length === 11) ? match[2] : null;
+}
+
+async function fetchContent(url: string): Promise<string | null> {
+    try {
+        // 1. YouTube Transcript
+        if (url.includes('youtube.com') || url.includes('youtu.be')) {
+            const videoId = extractVideoId(url);
+            if (videoId) {
+                try {
+                    const transcriptItems = await YoutubeTranscript.fetchTranscript(videoId);
+                    const text = transcriptItems.map(t => t.text).join(' ');
+                    // Limit to ~20k chars to avoid blowing up DB or Memory
+                    return text.slice(0, 20000);
+                } catch (err) {
+                    console.error('YouTube transcript failed:', err);
+                    // Fallback to null (will use metadata)
+                }
+            }
+        }
+
+        // 2. Article Content (Readability)
+        // Skip for Instagram/Twitter/TikTok as they are JS heavy/login walled
+        if (url.includes('instagram.com') || url.includes('twitter.com') || url.includes('x.com') || url.includes('tiktok.com')) {
+            return null;
+        }
+
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 5000); // 5s timeout
+        const res = await fetch(url, {
+            signal: controller.signal,
+            headers: {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+            }
+        });
+        clearTimeout(timeout);
+
+        if (!res.ok) return null;
+
+        const html = await res.text();
+        const doc = new DOMParser().parseFromString(html, "text/html");
+
+        if (!doc) return null;
+
+        const reader = new Readability(doc);
+        const article = reader.parse();
+        return article?.textContent ? article.textContent.trim().slice(0, 20000) : null;
+
+    } catch (e) {
+        console.error('Content scraping failed:', e);
+        return null; // Fail silently
     }
 }
 
@@ -422,16 +482,23 @@ Deno.serve(async (req) => {
                 const metadata = await fetchMetadata(url);
                 const hasMetadata = !!(metadata.title || metadata.description);
 
+                // 🧠 Deep Context: Fetch full content / transcript
+                const content = await fetchContent(url);
+
                 // Classify with LLM
+                // We pass the content excerpt to the LLM for better classification!
                 const classification = await classifyWithLLM(
-                    url, source, metadata.title, metadata.description, ""
+                    url, source, metadata.title, metadata.description, (content || "").slice(0, 1000)
                 );
 
                 // Determine status: if no metadata, ask for note
                 const status = hasMetadata ? "complete" : "pending_note";
 
+                // Content to Embed (Title + Summary + Content Chunk)
+                const embedContent = `${metadata.title || ''} ${classification.category} ${classification.summary} ${(content || "").slice(0, 4000)}`;
+
                 // Upsert to Supabase (dedup on user_phone + url_hash)
-                const { error } = await supabase
+                const { data, error } = await supabase
                     .from("saves")
                     .upsert(
                         {
@@ -440,6 +507,7 @@ Deno.serve(async (req) => {
                             source,
                             title: metadata.title || null,
                             raw_text: metadata.description || null,
+                            content: content || null, // Store full content
                             category: classification.category,
                             tags: classification.tags,
                             summary: classification.summary,
@@ -459,7 +527,6 @@ Deno.serve(async (req) => {
                 // 🧠 Generate Embedding (Fire and forget, or await)
                 if (data?.id) {
                     try {
-                        const textToEmbed = `${metadata.title || ''} ${classification.category} ${classification.summary} ${classification.tags.join(' ')}`;
                         const embeddingRes = await fetch('https://api.openai.com/v1/embeddings', {
                             method: 'POST',
                             headers: {
@@ -468,7 +535,7 @@ Deno.serve(async (req) => {
                             },
                             body: JSON.stringify({
                                 model: 'text-embedding-3-small',
-                                input: textToEmbed,
+                                input: embedContent, // Use richer content
                             }),
                         });
                         const embData = await embeddingRes.json();
