@@ -1,4 +1,6 @@
 import { Filter, Instagram, StickyNote, Clock } from 'lucide-react'
+import { Badge } from './ui/Badge'
+import { cn } from '../lib/utils'
 
 const FILTERS = [
     { key: 'instagram', label: 'Instagram only', icon: Instagram },
@@ -8,20 +10,24 @@ const FILTERS = [
 
 export default function QuickFilters({ active, onToggle }) {
     return (
-        <div className="quick-filters-scroll">
-            <Filter className="w-3.5 h-3.5 text-text-tertiary mr-0.5 shrink-0" />
+        <div className="flex items-center gap-2 overflow-x-auto scrollbar-none">
+            <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-white/5 bg-white/5">
+                <Filter className="h-3.5 w-3.5 text-white/40" />
+            </div>
             {FILTERS.map(({ key, label, icon: Icon }) => {
                 const isActive = active.includes(key)
                 return (
                     <button
                         key={key}
                         onClick={() => onToggle(key)}
-                        className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-[11px] font-medium transition-all border whitespace-nowrap shrink-0 ${isActive
-                                ? 'bg-accent-muted border-accent-border text-text'
-                                : 'bg-transparent border-border-subtle text-text-tertiary hover:text-text-secondary hover:border-border'
-                            }`}
+                        className={cn(
+                            "group inline-flex h-7 shrink-0 items-center gap-1.5 rounded-lg border px-2.5 text-xs font-medium transition-all",
+                            isActive
+                                ? "border-[var(--color-accent)]/30 bg-[var(--color-accent)]/10 text-[var(--color-accent)]"
+                                : "border-white/5 bg-white/5 text-[#9090b8] hover:border-white/10 hover:bg-white/10 hover:text-white"
+                        )}
                     >
-                        <Icon className="w-3 h-3" />
+                        <Icon className={cn("h-3.5 w-3.5 transition-colors", isActive ? "text-[var(--color-accent)]" : "text-[#5a5a80] group-hover:text-white/70")} />
                         {label}
                     </button>
                 )

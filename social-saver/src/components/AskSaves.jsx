@@ -1,7 +1,8 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef } from 'react'
 import { X, ArrowRight, Loader2, Sparkles, ArrowUpRight } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { marked } from 'marked'
+import { Button } from './ui/Button'
 
 export default function AskSaves({ saves }) {
     const [query, setQuery] = useState('')
@@ -20,7 +21,7 @@ export default function AskSaves({ saves }) {
 
         const edgeFnUrl = import.meta.env.VITE_EDGE_FUNCTION_URL || ''
 
-        // If no edge function URL is configured, do client-side search
+        // Client-side search fallback
         if (!edgeFnUrl) {
             const q = query.toLowerCase()
             const matches = saves.filter(s => {
@@ -51,7 +52,10 @@ export default function AskSaves({ saves }) {
         try {
             const res = await fetch(`${edgeFnUrl}/chat-brain`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`
+                },
                 body: JSON.stringify({ query }),
             })
             const data = await res.json()
@@ -70,97 +74,40 @@ export default function AskSaves({ saves }) {
     }
 
     return (
-        <div className="w-full">
-            {/* Input */}
-            <div style={{ position: 'relative' }}>
-                {/* Glow behind */}
-                <div style={{
-                    position: 'absolute',
-                    inset: '-2px',
-                    borderRadius: '18px',
-                    background: 'linear-gradient(135deg, rgba(124,109,250,0.4), rgba(244,114,182,0.3))',
-                    filter: 'blur(12px)',
-                    opacity: 0.6,
-                    zIndex: 0,
-                    pointerEvents: 'none'
-                }} />
-                <div style={{
-                    position: 'relative',
-                    zIndex: 1,
-                    display: 'flex',
-                    alignItems: 'center',
-                    background: 'rgba(13,13,22,0.97)',
-                    border: '1px solid rgba(124,109,250,0.3)',
-                    borderRadius: '20px',
-                    padding: '8px 8px 8px 20px',
-                    gap: '12px',
-                    boxShadow: '0 12px 40px rgba(0,0,0,0.5)',
-                    backdropFilter: 'blur(20px)',
-                }}>
-                    <span style={{ fontSize: '18px', lineHeight: 1 }}>
-                        {loading ? '⏳' : '🧠'}
-                    </span>
-                    <form onSubmit={handleSearch} style={{ flex: 1, display: 'flex', alignItems: 'center', gap: '8px' }}>
+        <div className="mx-auto w-full max-w-3xl">
+            {/* Hero Input */}
+            <div className="relative group">
+                <div className="absolute -inset-1 rounded-2xl bg-gradient-to-r from-[var(--color-accent)] to-[var(--color-accent-2)] opacity-20 blur transition duration-500 group-hover:opacity-40" />
+                <div className="relative flex items-center gap-4 rounded-xl border border-white/10 bg-[#161616]/80 p-2 pl-6 shadow-2xl backdrop-blur-xl transition-all focus-within:border-[var(--color-accent)]/50 focus-within:bg-[#1c1c1c]">
+                    <Sparkles className={`h-6 w-6 text-[var(--color-accent)] ${loading ? 'animate-pulse' : ''}`} />
+
+                    <form onSubmit={handleSearch} className="flex flex-1 items-center gap-3">
                         <input
                             ref={inputRef}
                             type="text"
                             value={query}
                             onChange={(e) => setQuery(e.target.value)}
                             placeholder="Ask your second brain anything..."
-                            style={{
-                                flex: 1,
-                                background: 'transparent',
-                                border: 'none',
-                                outline: 'none',
-                                fontSize: '16px',
-                                color: 'var(--color-text)',
-                                height: '52px',
-                                fontFamily: 'inherit',
-                                letterSpacing: '-0.01em',
-                            }}
+                            className="flex-1 bg-transparent py-4 text-lg font-medium text-white placeholder-white/20 outline-none"
                         />
+
                         {query && (
                             <button
                                 type="button"
                                 onClick={() => { setQuery(''); setAiReply(null); setReferences(null); }}
-                                style={{
-                                    padding: '4px',
-                                    color: 'var(--color-text-tertiary)',
-                                    background: 'none',
-                                    border: 'none',
-                                    cursor: 'pointer',
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                }}
+                                className="rounded-full p-2 text-white/40 hover:bg-white/10 hover:text-white"
                             >
-                                <X style={{ width: '14px', height: '14px' }} />
+                                <X className="h-4 w-4" />
                             </button>
                         )}
-                        <button
+
+                        <Button
                             type="submit"
                             disabled={!query.trim() || loading}
-                            style={{
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: '8px',
-                                padding: '12px 24px',
-                                borderRadius: '14px',
-                                background: 'linear-gradient(135deg, #7c6dfa, #a78bfa)',
-                                color: '#fff',
-                                fontSize: '15px',
-                                fontWeight: 700,
-                                border: 'none',
-                                cursor: query.trim() && !loading ? 'pointer' : 'not-allowed',
-                                opacity: !query.trim() || loading ? 0.5 : 1,
-                                transition: 'all 0.2s',
-                                boxShadow: '0 4px 16px rgba(124,109,250,0.45)',
-                                fontFamily: 'inherit',
-                                letterSpacing: '-0.01em',
-                                whiteSpace: 'nowrap',
-                            }}
+                            className={`rounded-lg px-6 py-2.5 font-bold transition-all ${!query.trim() ? 'opacity-0 scale-95' : 'opacity-100 scale-100'}`}
                         >
-                            {loading ? <Loader2 style={{ width: '14px', height: '14px', animation: 'spin 1s linear infinite' }} /> : <><span>Ask</span><ArrowRight style={{ width: '13px', height: '13px' }} /></>}
-                        </button>
+                            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
+                        </Button>
                     </form>
                 </div>
             </div>
@@ -169,81 +116,42 @@ export default function AskSaves({ saves }) {
             <AnimatePresence>
                 {aiReply && (
                     <motion.div
-                        initial={{ opacity: 0, y: 10 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: -10 }}
-                        style={{ marginTop: '12px' }}
+                        initial={{ opacity: 0, y: 10, height: 0 }}
+                        animate={{ opacity: 1, y: 0, height: 'auto' }}
+                        exit={{ opacity: 0, y: -10, height: 0 }}
+                        className="mt-6 overflow-hidden"
                     >
-                        <div style={{
-                            background: 'rgba(13,13,22,0.95)',
-                            border: '1px solid rgba(124,109,250,0.2)',
-                            borderRadius: '16px',
-                            overflow: 'hidden',
-                            boxShadow: '0 16px 48px rgba(0,0,0,0.4)',
-                            backdropFilter: 'blur(16px)',
-                        }}>
-                            {/* Top accent line */}
-                            <div style={{
-                                height: '2px',
-                                background: 'linear-gradient(90deg, #7c6dfa, #f472b6)',
-                            }} />
-                            <div style={{ padding: '20px' }}>
-                                <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-start' }}>
-                                    <div style={{
-                                        width: '28px',
-                                        height: '28px',
-                                        borderRadius: '8px',
-                                        background: 'linear-gradient(135deg, rgba(124,109,250,0.2), rgba(244,114,182,0.15))',
-                                        border: '1px solid rgba(124,109,250,0.2)',
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        justifyContent: 'center',
-                                        flexShrink: 0,
-                                    }}>
-                                        <Sparkles style={{ width: '14px', height: '14px', color: '#a78bfa' }} />
+                        <div className="overflow-hidden rounded-2xl border border-white/10 bg-[#0e0e1a]/95 shadow-2xl backdrop-blur-xl">
+                            <div className="h-1 w-full bg-gradient-to-r from-[var(--color-accent)] to-[var(--color-accent-2)]" />
+                            <div className="p-8">
+                                <div className="flex gap-6">
+                                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[var(--color-accent)]/10 border border-[var(--color-accent)]/20">
+                                        <Sparkles className="h-5 w-5 text-[var(--color-accent-2)]" />
                                     </div>
-                                    <div style={{ flex: 1 }}>
+                                    <div className="flex-1 space-y-6">
                                         <div
-                                            style={{ fontSize: '14px', lineHeight: 1.6, color: 'var(--color-text-secondary)' }}
+                                            className="prose prose-invert max-w-none text-base leading-relaxed text-[#9090b8] prose-strong:text-white prose-p:my-2"
                                             dangerouslySetInnerHTML={{ __html: marked(aiReply) }}
                                         />
 
                                         {references && references.length > 0 && (
-                                            <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid var(--color-border-subtle)' }}>
-                                                <div style={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--color-text-tertiary)', fontWeight: 700, marginBottom: '8px' }}>
+                                            <div className="border-t border-white/5 pt-6">
+                                                <div className="mb-4 text-xs font-bold uppercase tracking-wider text-[#5a5a80]">
                                                     Sources
                                                 </div>
-                                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' }}>
+                                                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                                                     {references.map((ref) => (
                                                         <a
                                                             key={ref.id}
                                                             href={ref.url}
                                                             target="_blank"
                                                             rel="noopener noreferrer"
-                                                            style={{
-                                                                display: 'flex',
-                                                                alignItems: 'center',
-                                                                gap: '8px',
-                                                                padding: '8px 10px',
-                                                                borderRadius: '10px',
-                                                                background: 'rgba(255,255,255,0.03)',
-                                                                border: '1px solid var(--color-border-subtle)',
-                                                                textDecoration: 'none',
-                                                                transition: 'all 0.15s',
-                                                            }}
-                                                            onMouseEnter={e => {
-                                                                e.currentTarget.style.borderColor = 'rgba(124,109,250,0.3)'
-                                                                e.currentTarget.style.background = 'rgba(124,109,250,0.07)'
-                                                            }}
-                                                            onMouseLeave={e => {
-                                                                e.currentTarget.style.borderColor = 'var(--color-border-subtle)'
-                                                                e.currentTarget.style.background = 'rgba(255,255,255,0.03)'
-                                                            }}
+                                                            className="group flex items-center justify-between rounded-lg border border-white/5 bg-white/5 px-4 py-3 transition-all hover:border-[var(--color-accent)]/30 hover:bg-[var(--color-accent)]/10"
                                                         >
-                                                            <span style={{ fontSize: '12px', color: 'var(--color-text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
+                                                            <span className="truncate text-sm font-medium text-[#9090b8] group-hover:text-[#f0f0ff]">
                                                                 {ref.title || ref.summary}
                                                             </span>
-                                                            <ArrowUpRight style={{ width: '12px', height: '12px', color: 'var(--color-text-tertiary)', flexShrink: 0 }} />
+                                                            <ArrowUpRight className="h-3.5 w-3.5 text-[#5a5a80] transition-colors group-hover:text-[#a78bfa]" />
                                                         </a>
                                                     ))}
                                                 </div>

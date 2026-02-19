@@ -1,7 +1,7 @@
 // @ts-nocheck
 // supabase/functions/whatsapp-webhook/index.ts
 // Twilio WhatsApp webhook handler — receives messages, extracts URLs,
-// calls OpenAI for categorization, saves to Supabase, replies via TwiML.
+// calls Gemini for categorization, saves to Supabase, replies via TwiML.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { DOMParser } from "https://deno.land/x/deno_dom@v0.1.38/deno-dom-wasm.ts";
@@ -10,7 +10,7 @@ import { YoutubeTranscript } from "https://esm.sh/youtube-transcript";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY")!;
+const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY")!;
 const APP_URL = Deno.env.get("APP_URL") || "https://social-saver.vercel.app";
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
@@ -30,7 +30,6 @@ const CATEGORY_EMOJIS: Record<string, string> = {
 function extractUrls(text: string): string[] {
     const urlRegex = /(https?:\/\/[^\s<>"{}|\\^`\[\]]+)/gi;
     const matches = text.match(urlRegex) || [];
-    // Deduplicate
     return [...new Set(matches.map((u) => u.replace(/[.,;:!?)]+$/, "")))];
 }
 
@@ -56,7 +55,6 @@ async function fetchMetadata(url: string): Promise<{ title: string; description:
 
         const html = await res.text();
 
-        // Extract OG tags
         const ogTitle = html.match(/<meta[^>]*property=["']og:title["'][^>]*content=["']([^"']+)["']/i)?.[1] || "";
         const ogDesc = html.match(/<meta[^>]*property=["']og:description["'][^>]*content=["']([^"']+)["']/i)?.[1] || "";
         const titleTag = html.match(/<title[^>]*>([^<]+)<\/title>/i)?.[1] || "";
@@ -78,30 +76,25 @@ function extractVideoId(url: string): string | null {
 
 async function fetchContent(url: string): Promise<string | null> {
     try {
-        // 1. YouTube Transcript
         if (url.includes('youtube.com') || url.includes('youtu.be')) {
             const videoId = extractVideoId(url);
             if (videoId) {
                 try {
                     const transcriptItems = await YoutubeTranscript.fetchTranscript(videoId);
                     const text = transcriptItems.map(t => t.text).join(' ');
-                    // Limit to ~20k chars to avoid blowing up DB or Memory
                     return text.slice(0, 20000);
                 } catch (err) {
                     console.error('YouTube transcript failed:', err);
-                    // Fallback to null (will use metadata)
                 }
             }
         }
 
-        // 2. Article Content (Readability)
-        // Skip for Instagram/Twitter/TikTok as they are JS heavy/login walled
         if (url.includes('instagram.com') || url.includes('twitter.com') || url.includes('x.com') || url.includes('tiktok.com')) {
             return null;
         }
 
         const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 5000); // 5s timeout
+        const timeout = setTimeout(() => controller.abort(), 5000);
         const res = await fetch(url, {
             signal: controller.signal,
             headers: {
@@ -123,9 +116,80 @@ async function fetchContent(url: string): Promise<string | null> {
 
     } catch (e) {
         console.error('Content scraping failed:', e);
-        return null; // Fail silently
+        return null;
     }
 }
+
+// ── Gemini API Helpers ──────────────────────────────────
+
+async function callGemini(prompt: string, options: { temperature?: number; maxTokens?: number; jsonMode?: boolean } = {}): Promise<string> {
+    const { temperature = 0.3, maxTokens = 300, jsonMode = false } = options;
+
+    const body: any = {
+        contents: [
+            {
+                role: 'user',
+                parts: [{ text: prompt }]
+            }
+        ],
+        generationConfig: {
+            temperature,
+            maxOutputTokens: maxTokens,
+        },
+    };
+
+    if (jsonMode) {
+        body.generationConfig.responseMimeType = 'application/json';
+    }
+
+    const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`,
+        {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+        }
+    );
+
+    if (!res.ok) {
+        console.error("Gemini error:", res.status, await res.text());
+        throw new Error(`Gemini API error: ${res.status}`);
+    }
+
+    const data = await res.json();
+    return data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+}
+
+async function generateEmbedding(text: string): Promise<number[] | null> {
+    try {
+        const response = await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent?key=${GEMINI_API_KEY}`,
+            {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    model: 'models/gemini-embedding-001',
+                    content: {
+                        parts: [{ text }]
+                    },
+                }),
+            }
+        );
+
+        if (!response.ok) {
+            console.error('Gemini Embedding Error:', await response.text());
+            return null;
+        }
+
+        const data = await response.json();
+        return data.embedding?.values || null;
+    } catch (e) {
+        console.error('Embedding generation failed:', e);
+        return null;
+    }
+}
+
+// ── Classification ──────────────────────────────────────
 
 async function classifyWithLLM(
     url: string,
@@ -140,21 +204,7 @@ async function classifyWithLLM(
         const isReel = url.includes("/reel/") || url.includes("/reels/");
         const isPost = url.includes("/p/");
 
-        const res = await fetch("https://api.openai.com/v1/chat/completions", {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                Authorization: `Bearer ${OPENAI_API_KEY}`,
-            },
-            body: JSON.stringify({
-                model: "gpt-4o-mini",
-                response_format: { type: "json_object" },
-                temperature: 0.3,
-                max_tokens: 250,
-                messages: [
-                    {
-                        role: "system",
-                        content: `You are a content categorizer for saved social media links. Output a JSON object with exactly these fields:
+        const prompt = `You are a content categorizer for saved social media links. Output a JSON object with exactly these fields:
 - "category": exactly one of [${CATEGORIES.join(", ")}]
 - "tags": array of 3-6 lowercase keyword tags relevant to the content
 - "summary": one concise sentence (max 20 words) in format "What it is—why it matters." Example: "5-min core circuit using planks—great for quick daily strength."
@@ -165,32 +215,19 @@ Rules:
 - ${isReel ? 'This is a video Reel (short-form video).' : isPost ? 'This is an image/carousel post.' : ''}
 - If insufficient info, use category="Other" and summary="Saved link (add a note to improve)."
 - Never invent specific claims you can't verify from the given info.
-- Always respond with valid JSON. No markdown, no extra text.`,
-                    },
-                    {
-                        role: "user",
-                        content: `URL: ${url}
+- Always respond with valid JSON only. No markdown, no extra text.
+
+URL: ${url}
 Source: ${source}
 Title: ${title || "(none)"}
 Description: ${description || "(none)"}
-User note: ${userNote || "(none)"}`,
-                    },
-                ],
-            }),
-        });
+User note: ${userNote || "(none)"}`;
 
-        if (!res.ok) {
-            console.error("OpenAI error:", res.status, await res.text());
-            return fallback;
-        }
-
-        const data = await res.json();
-        const content = data.choices?.[0]?.message?.content;
+        const content = await callGemini(prompt, { temperature: 0.3, maxTokens: 250, jsonMode: true });
         if (!content) return fallback;
 
         const parsed = JSON.parse(content);
 
-        // Validate & sanitize
         const category = CATEGORIES.includes(parsed.category) ? parsed.category : "Other";
         const tags = Array.isArray(parsed.tags)
             ? parsed.tags.filter((t: unknown) => typeof t === "string").slice(0, 8)
@@ -209,15 +246,21 @@ User note: ${userNote || "(none)"}`,
     }
 }
 
-// ── Voice → Whisper transcription ───────────────────────
+// ── Voice → Transcription (graceful fallback) ───────────
 
 async function transcribeAudio(mediaUrl: string): Promise<string> {
+    // Gemini doesn't have a direct Whisper equivalent via simple REST
+    // Try OpenAI Whisper if key is available, otherwise return empty
+    const openaiKey = Deno.env.get('OPENAI_API_KEY');
+    if (!openaiKey) {
+        console.log("No OPENAI_API_KEY set — voice transcription unavailable");
+        return "";
+    }
+
     try {
-        // Download the audio file from Twilio
         const audioRes = await fetch(mediaUrl);
         const audioBlob = await audioRes.blob();
 
-        // Build multipart form for OpenAI Whisper
         const form = new FormData();
         form.append("file", audioBlob, "voice.ogg");
         form.append("model", "whisper-1");
@@ -225,7 +268,7 @@ async function transcribeAudio(mediaUrl: string): Promise<string> {
 
         const whisperRes = await fetch("https://api.openai.com/v1/audio/transcriptions", {
             method: "POST",
-            headers: { Authorization: `Bearer ${OPENAI_API_KEY}` },
+            headers: { Authorization: `Bearer ${openaiKey}` },
             body: form,
         });
 
@@ -242,45 +285,53 @@ async function transcribeAudio(mediaUrl: string): Promise<string> {
     }
 }
 
-// ── Image → GPT-4o Vision description ──────────────────
+// ── Image → Gemini Vision description ──────────────────
 
 async function describeImage(mediaUrl: string): Promise<{ title: string; description: string }> {
     try {
-        const res = await fetch("https://api.openai.com/v1/chat/completions", {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                Authorization: `Bearer ${OPENAI_API_KEY}`,
-            },
-            body: JSON.stringify({
-                model: "gpt-4o-mini",
-                max_tokens: 200,
-                messages: [
-                    {
-                        role: "system",
-                        content: "Describe this image concisely. Extract: a short title (max 8 words) and a description (max 30 words). If it's a book cover, product, screenshot, recipe, or workout — mention that. Return JSON: { \"title\": \"...\", \"description\": \"...\" }",
-                    },
-                    {
-                        role: "user",
-                        content: [
+        // Download image and convert to base64
+        const imageRes = await fetch(mediaUrl);
+        const imageBuffer = await imageRes.arrayBuffer();
+        const base64Image = btoa(String.fromCharCode(...new Uint8Array(imageBuffer)));
+        const mimeType = imageRes.headers.get('content-type') || 'image/jpeg';
+
+        const res = await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`,
+            {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    contents: [{
+                        role: 'user',
+                        parts: [
                             {
-                                type: "image_url",
-                                image_url: { url: mediaUrl, detail: "low" },
+                                inlineData: {
+                                    mimeType,
+                                    data: base64Image,
+                                }
                             },
-                        ],
+                            {
+                                text: 'Describe this image concisely. Extract: a short title (max 8 words) and a description (max 30 words). If it\'s a book cover, product, screenshot, recipe, or workout — mention that. Return JSON only: { "title": "...", "description": "..." }'
+                            }
+                        ]
+                    }],
+                    generationConfig: {
+                        temperature: 0.3,
+                        maxOutputTokens: 200,
+                        responseMimeType: 'application/json',
                     },
-                ],
-                response_format: { type: "json_object" },
-            }),
-        });
+                }),
+            }
+        );
 
         if (!res.ok) {
-            console.error("Vision error:", res.status);
+            console.error("Gemini Vision error:", res.status);
             return { title: "Image save", description: "" };
         }
 
         const data = await res.json();
-        const parsed = JSON.parse(data.choices[0].message.content);
+        const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+        const parsed = JSON.parse(text);
         return {
             title: parsed.title || "Image save",
             description: parsed.description || "",
@@ -292,7 +343,6 @@ async function describeImage(mediaUrl: string): Promise<{ title: string; descrip
 }
 
 function twimlResponse(message: string): Response {
-    // Sanitize message for XML
     const safeMsg = message
         .replace(/&/g, "&amp;")
         .replace(/</g, "&lt;")
@@ -313,7 +363,6 @@ function twimlResponse(message: string): Response {
 // ── Main Handler ─────────────────────────────────────────
 
 Deno.serve(async (req) => {
-    // Handle CORS preflight
     if (req.method === "OPTIONS") {
         return new Response(null, {
             status: 204,
@@ -330,7 +379,6 @@ Deno.serve(async (req) => {
     }
 
     try {
-        // Parse Twilio form data
         const formData = await req.formData();
         const body = (formData.get("Body") as string) || "";
         const from = (formData.get("From") as string) || "";
@@ -350,10 +398,9 @@ Deno.serve(async (req) => {
             const transcript = await transcribeAudio(mediaUrl);
 
             if (!transcript) {
-                return twimlResponse("🎙️ Couldn't transcribe your voice note. Try again?");
+                return twimlResponse("🎙️ Voice notes are currently unavailable. Please send a text or link instead!");
             }
 
-            // Classify the transcript
             const classification = await classifyWithLLM("", "voice", "Voice Note", transcript, body);
 
             await supabase.from("saves").insert({
@@ -384,7 +431,6 @@ Deno.serve(async (req) => {
             console.log("[webhook] Processing image...");
             const imageInfo = await describeImage(mediaUrl);
 
-            // Classify the image description
             const classification = await classifyWithLLM(
                 mediaUrl, "image", imageInfo.title, imageInfo.description, body
             );
@@ -418,7 +464,6 @@ Deno.serve(async (req) => {
         if (urls.length === 0) {
             const noteText = body.trim();
 
-            // Check if user has a pending note
             const { data: pending } = await supabase
                 .from("saves")
                 .select("*")
@@ -431,7 +476,6 @@ Deno.serve(async (req) => {
                 const row = pending[0];
 
                 if (noteText.toLowerCase() === "skip") {
-                    // User skipped note, mark as complete
                     await supabase
                         .from("saves")
                         .update({ status: "complete" })
@@ -440,7 +484,6 @@ Deno.serve(async (req) => {
                     return twimlResponse("Got it! Saved without a note. ✅");
                 }
 
-                // Re-classify with user note
                 const result = await classifyWithLLM(row.url, row.source, row.title || "", row.raw_text || "", noteText);
 
                 await supabase
@@ -463,7 +506,6 @@ Deno.serve(async (req) => {
                 );
             }
 
-            // No pending and no URL — help text
             return twimlResponse(
                 "👋 Hey! Send me an Instagram (or any) link and I'll save it to your dashboard.\n\n" +
                 `🔗 Your dashboard: ${APP_URL}/?u=${encodeURIComponent(from)}`
@@ -475,29 +517,19 @@ Deno.serve(async (req) => {
 
         for (const url of urls) {
             try {
-                // Detect source
                 const source = detectSource(url);
-
-                // Fetch metadata (3s timeout, graceful fail)
                 const metadata = await fetchMetadata(url);
                 const hasMetadata = !!(metadata.title || metadata.description);
-
-                // 🧠 Deep Context: Fetch full content / transcript
                 const content = await fetchContent(url);
 
-                // Classify with LLM
-                // We pass the content excerpt to the LLM for better classification!
                 const classification = await classifyWithLLM(
                     url, source, metadata.title, metadata.description, (content || "").slice(0, 1000)
                 );
 
-                // Determine status: if no metadata, ask for note
                 const status = hasMetadata ? "complete" : "pending_note";
 
-                // Content to Embed (Title + Summary + Content Chunk)
                 const embedContent = `${metadata.title || ''} ${classification.category} ${classification.summary} ${(content || "").slice(0, 4000)}`;
 
-                // Upsert to Supabase (dedup on user_phone + url_hash)
                 const { data, error } = await supabase
                     .from("saves")
                     .upsert(
@@ -507,7 +539,7 @@ Deno.serve(async (req) => {
                             source,
                             title: metadata.title || null,
                             raw_text: metadata.description || null,
-                            content: content || null, // Store full content
+                            content: content || null,
                             category: classification.category,
                             tags: classification.tags,
                             summary: classification.summary,
@@ -524,26 +556,11 @@ Deno.serve(async (req) => {
                     continue;
                 }
 
-                // 🧠 Generate Embedding (Fire and forget, or await)
+                // Generate Embedding with Gemini
                 if (data?.id) {
-                    try {
-                        const embeddingRes = await fetch('https://api.openai.com/v1/embeddings', {
-                            method: 'POST',
-                            headers: {
-                                'Authorization': `Bearer ${OPENAI_API_KEY}`,
-                                'Content-Type': 'application/json',
-                            },
-                            body: JSON.stringify({
-                                model: 'text-embedding-3-small',
-                                input: embedContent, // Use richer content
-                            }),
-                        });
-                        const embData = await embeddingRes.json();
-                        if (embData.data?.[0]?.embedding) {
-                            await supabase.from('saves').update({ embedding: embData.data[0].embedding }).eq('id', data.id);
-                        }
-                    } catch (e) {
-                        console.error('Embedding generation failed:', e);
+                    const embedding = await generateEmbedding(embedContent.slice(0, 2000));
+                    if (embedding) {
+                        await supabase.from('saves').update({ embedding }).eq('id', data.id);
                     }
                 }
 
@@ -553,7 +570,6 @@ Deno.serve(async (req) => {
                     `📝 ${classification.summary}`
                 );
 
-                // If pending note, prompt user
                 if (status === "pending_note") {
                     results.push(
                         `\n💡 Couldn't fetch details for this link. Reply with a short note about it, or say "skip".`
@@ -562,7 +578,6 @@ Deno.serve(async (req) => {
             } catch (err) {
                 console.error(`Error processing ${url}:`, err);
 
-                // Failsafe: save URL even on error
                 try {
                     await supabase.from("saves").upsert(
                         {
@@ -583,7 +598,6 @@ Deno.serve(async (req) => {
             }
         }
 
-        // Build reply
         const reply = results.join("\n\n") +
             `\n\n🔗 Dashboard: ${APP_URL}/?u=${encodeURIComponent(from)}`;
 

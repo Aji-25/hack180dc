@@ -1,5 +1,7 @@
 import { Bookmark, TrendingUp, Calendar, Zap, Sparkles } from 'lucide-react'
 import SyncModal from './SyncModal'
+import { Button } from './ui/Button'
+import { Badge } from './ui/Badge'
 
 export default function Header({ totalSaves, stats, userPhone, onLogoClick }) {
     const topCategory = stats?.categories
@@ -9,93 +11,57 @@ export default function Header({ totalSaves, stats, userPhone, onLogoClick }) {
     const weekCount = stats?.weekCount ?? totalSaves
 
     return (
-        <header>
-            <div style={{
-                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                width: '100%', maxWidth: '1152px', margin: '0 auto', padding: '0 28px',
-                height: '100%',
-            }}>
+        <header className="fixed top-0 z-40 w-full border-b border-white/5 bg-[var(--color-bg)]/80 backdrop-blur-xl transition-all duration-300">
+            <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-6">
                 {/* Left Section */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
-                    {/* Logo — clickable to landing */}
+                <div className="flex items-center gap-6">
+                    {/* Logo */}
                     <button
                         onClick={onLogoClick}
-                        style={{
-                            display: 'flex', alignItems: 'center', gap: '14px',
-                            background: 'none', border: 'none', cursor: 'pointer',
-                            padding: '8px 4px', borderRadius: '14px',
-                            transition: 'all 0.25s ease',
-                        }}
-                        onMouseEnter={e => e.currentTarget.style.opacity = '0.8'}
-                        onMouseLeave={e => e.currentTarget.style.opacity = '1'}
+                        className="group flex items-center gap-3 transition-opacity hover:opacity-80"
                         title="Back to landing page"
                     >
-                        <div style={{
-                            width: '38px', height: '38px', borderRadius: '12px',
-                            display: 'flex', alignItems: 'center', justifyContent: 'center',
-                            background: 'linear-gradient(135deg, #7c6dfa, #a78bfa)',
-                            boxShadow: '0 4px 16px rgba(124,109,250,0.35), inset 0 1px 0 rgba(255,255,255,0.15)',
-                            flexShrink: 0,
-                        }}>
-                            <Bookmark style={{ width: '18px', height: '18px', color: '#fff' }} strokeWidth={2.5} />
+                        <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-[var(--color-accent)] to-[var(--color-accent-2)] shadow-lg shadow-[var(--color-accent)]/20 ring-1 ring-white/20 transition-transform group-hover:scale-105">
+                            <Bookmark className="h-5 w-5 text-white" strokeWidth={2.5} />
                         </div>
-                        <span style={{
-                            fontSize: '18px', fontWeight: 800, letterSpacing: '-0.03em',
-                            background: 'linear-gradient(135deg, #ffffff 0%, rgba(255,255,255,0.7) 100%)',
-                            WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent',
-                            backgroundClip: 'text',
-                        }}>
+                        <span className="bg-gradient-to-br from-white to-white/70 bg-clip-text text-lg font-bold tracking-tight text-transparent">
                             Social Saver
                         </span>
                     </button>
 
                     {/* Divider */}
-                    <div style={{ width: '1px', height: '24px', background: 'rgba(255,255,255,0.08)' }} />
+                    <div className="h-6 w-px bg-white/10" />
 
-                    {/* Sync */}
-                    {userPhone && <SyncModal userPhone={userPhone} />}
-
-                    {/* Stats pills */}
+                    {/* Stats */}
                     {totalSaves > 0 && (
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                            <div style={{
-                                display: 'flex', alignItems: 'center', gap: '8px',
-                                padding: '7px 14px', borderRadius: '100px',
-                                background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.06)',
-                                fontSize: '12px', fontWeight: 600, color: 'rgba(255,255,255,0.5)',
-                            }}>
-                                <Calendar style={{ width: '13px', height: '13px', opacity: 0.5 }} />
-                                <span style={{ fontFamily: 'monospace', color: 'rgba(255,255,255,0.7)' }}>{weekCount}</span>
+                        <div className="hidden items-center gap-3 md:flex">
+                            <div className="flex items-center gap-2 rounded-full border border-white/5 bg-white/5 px-3 py-1.5 text-xs font-medium text-white/50">
+                                <Calendar className="h-3.5 w-3.5 opacity-50" />
+                                <span className="font-mono text-white/80">{weekCount}</span>
                                 <span>this week</span>
                             </div>
+
                             {topCategory && (
-                                <div style={{
-                                    display: 'flex', alignItems: 'center', gap: '8px',
-                                    padding: '7px 14px', borderRadius: '100px',
-                                    background: 'rgba(124,109,250,0.08)', border: '1px solid rgba(124,109,250,0.15)',
-                                    fontSize: '12px', fontWeight: 600, color: 'rgba(167,139,250,0.8)',
-                                }}>
-                                    <TrendingUp style={{ width: '13px', height: '13px', opacity: 0.6 }} />
-                                    <span>{topCategory}</span>
-                                </div>
+                                <Badge variant={topCategory.toLowerCase()} className="h-auto py-1.5 pl-2 pr-3 text-xs font-medium capitalize">
+                                    <TrendingUp className="mr-1.5 h-3.5 w-3.5 opacity-70" />
+                                    {topCategory}
+                                </Badge>
                             )}
                         </div>
                     )}
                 </div>
 
                 {/* Right Section */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                <div className="flex items-center gap-4">
+                    {userPhone && <SyncModal userPhone={userPhone} />}
+
                     {totalSaves > 0 && (
-                        <div style={{
-                            display: 'flex', alignItems: 'center', gap: '8px',
-                            padding: '8px 16px', borderRadius: '100px',
-                            background: 'rgba(124,109,250,0.06)', border: '1px solid rgba(124,109,250,0.12)',
-                        }}>
-                            <Sparkles style={{ width: '14px', height: '14px', color: '#7c6dfa' }} />
-                            <span style={{ fontFamily: 'monospace', fontSize: '14px', fontWeight: 700, color: 'rgba(255,255,255,0.8)' }}>
+                        <div className="flex items-center gap-2 rounded-full border border-[var(--color-accent)]/10 bg-[var(--color-accent)]/5 px-4 py-1.5">
+                            <Sparkles className="h-3.5 w-3.5 text-[var(--color-accent)]" />
+                            <span className="font-mono text-sm font-bold text-white/90">
                                 {totalSaves}
                             </span>
-                            <span style={{ fontSize: '12px', color: 'rgba(255,255,255,0.35)', fontWeight: 500 }}>
+                            <span className="text-xs font-medium text-white/40">
                                 saves
                             </span>
                         </div>

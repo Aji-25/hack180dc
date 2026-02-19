@@ -1,6 +1,9 @@
 import { useMemo, useState, useEffect, useRef, useCallback } from 'react'
 import ForceGraph2D from 'react-force-graph-2d'
 import { ZoomIn, ZoomOut, Maximize2, X } from 'lucide-react'
+import { Card } from './ui/Card'
+import { Button } from './ui/Button'
+import { cn } from '../lib/utils'
 
 /* ── Category Colors ── */
 const CAT_COLORS = {
@@ -10,7 +13,7 @@ const CAT_COLORS = {
     Travel: '#1da1f2',
     Design: '#e1306c',
     Business: '#60a5fa',
-    'Self-Improvement': '#f472b6',
+    'Self-Improvement': '#ff6b6b',
     Other: '#9ca3af',
 }
 
@@ -273,79 +276,61 @@ export default function KnowledgeGraph({ saves }) {
 
         if (selectedNode.group === 'save') {
             return (
-                <div className="kg-tooltip">
-                    <button className="kg-tooltip-close" onClick={() => setSelectedNode(null)}>
-                        <X style={{ width: '14px', height: '14px' }} />
+                <Card className="absolute left-[50%] top-[50%] z-20 w-80 -translate-x-1/2 -translate-y-1/2 bg-[#0e0e1a]/95 backdrop-blur-xl shadow-2xl border-white/10 p-0 text-left">
+                    <button className="absolute right-3 top-3 rounded-full p-1 text-white/40 hover:bg-white/10 hover:text-white" onClick={() => setSelectedNode(null)}>
+                        <X className="h-4 w-4" />
                     </button>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
-                        <div style={{
-                            width: '8px', height: '8px', borderRadius: '50%',
-                            background: selectedNode.color, flexShrink: 0,
-                        }} />
-                        <span style={{ fontSize: '11px', color: 'rgba(255,255,255,0.45)', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 700 }}>
-                            {selectedNode.source} · {selectedNode.category}
-                        </span>
-                    </div>
-                    <h4 style={{ fontSize: '14px', fontWeight: 700, color: '#fff', marginBottom: '8px', lineHeight: 1.4 }}>
-                        {selectedNode.name}
-                    </h4>
-                    {selectedNode.summary && (
-                        <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.5)', lineHeight: 1.5, marginBottom: '12px' }}>
-                            {truncate(selectedNode.summary, 120)}
-                        </p>
-                    )}
-                    {selectedNode.tags?.length > 0 && (
-                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginBottom: '12px' }}>
-                            {selectedNode.tags.map(tag => (
-                                <span key={tag} style={{
-                                    fontSize: '10px', padding: '3px 8px', borderRadius: '100px',
-                                    background: 'rgba(255,255,255,0.06)', color: 'rgba(255,255,255,0.5)',
-                                    fontWeight: 600,
-                                }}>#{tag}</span>
-                            ))}
+                    <div className="p-4">
+                        <div className="mb-2 flex items-center gap-2">
+                            <div className="h-2 w-2 rounded-full" style={{ background: selectedNode.color }} />
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-white/50">
+                                {selectedNode.source} · {selectedNode.category}
+                            </span>
                         </div>
-                    )}
-                    {selectedNode.url && (
-                        <a href={selectedNode.url} target="_blank" rel="noopener noreferrer"
-                            style={{
-                                fontSize: '12px', fontWeight: 600, color: '#7c6dfa',
-                                textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '4px',
-                            }}>
-                            Open link →
-                        </a>
-                    )}
-                </div>
+                        <h4 className="mb-2 text-sm font-bold leading-relaxed text-white">
+                            {selectedNode.name}
+                        </h4>
+                        {selectedNode.summary && (
+                            <p className="mb-3 text-xs leading-relaxed text-white/50">
+                                {truncate(selectedNode.summary, 120)}
+                            </p>
+                        )}
+                        {selectedNode.tags?.length > 0 && (
+                            <div className="mb-4 flex flex-wrap gap-1">
+                                {selectedNode.tags.map(tag => (
+                                    <span key={tag} className="rounded-full bg-white/5 px-2 py-0.5 text-[10px] font-medium text-white/50 border border-white/5">#{tag}</span>
+                                ))}
+                            </div>
+                        )}
+                        {selectedNode.url && (
+                            <a
+                                href={selectedNode.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="flex w-full items-center justify-center rounded-lg bg-[var(--color-accent)]/10 py-2 text-xs font-semibold text-[var(--color-accent)] hover:bg-[var(--color-accent)]/20 transition-colors"
+                            >
+                                Open Link →
+                            </a>
+                        )}
+                    </div>
+                </Card>
             )
         }
 
         if (selectedNode.group === 'category') {
             return (
-                <div className="kg-tooltip">
-                    <button className="kg-tooltip-close" onClick={() => setSelectedNode(null)}>
-                        <X style={{ width: '14px', height: '14px' }} />
+                <Card className="absolute left-[50%] top-[50%] z-20 w-56 -translate-x-1/2 -translate-y-1/2 bg-[#0e0e1a]/95 backdrop-blur-xl shadow-2xl border-white/10 p-4 text-left">
+                    <button className="absolute right-3 top-3 rounded-full p-1 text-white/40 hover:bg-white/10 hover:text-white" onClick={() => setSelectedNode(null)}>
+                        <X className="h-4 w-4" />
                     </button>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
-                        <div style={{ width: '12px', height: '12px', borderRadius: '50%', background: selectedNode.color }} />
-                        <span style={{ fontSize: '15px', fontWeight: 700, color: '#fff' }}>{selectedNode.name}</span>
+                    <div className="mb-2 flex items-center gap-2">
+                        <div className="h-3 w-3 rounded-full" style={{ background: selectedNode.color }} />
+                        <span className="text-sm font-bold text-white">{selectedNode.name}</span>
                     </div>
-                    <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.45)' }}>
+                    <p className="text-xs text-white/50">
                         {categoryStats.find(c => c.name === selectedNode.name)?.count || 0} saves in this category
                     </p>
-                </div>
-            )
-        }
-
-        if (selectedNode.group === 'tag') {
-            return (
-                <div className="kg-tooltip">
-                    <button className="kg-tooltip-close" onClick={() => setSelectedNode(null)}>
-                        <X style={{ width: '14px', height: '14px' }} />
-                    </button>
-                    <span style={{ fontSize: '14px', fontWeight: 700, color: '#fff' }}>{selectedNode.name}</span>
-                    <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.45)', marginTop: '4px' }}>
-                        Shared by {selectedNode.connectedSaves || 0} saves
-                    </p>
-                </div>
+                </Card>
             )
         }
 
@@ -353,7 +338,7 @@ export default function KnowledgeGraph({ saves }) {
     }
 
     return (
-        <div ref={containerRef} className="kg-container">
+        <Card ref={containerRef} className="relative h-[600px] w-full overflow-hidden border-white/5 bg-[#080810] p-0 shadow-lg">
             <ForceGraph2D
                 ref={graphRef}
                 width={dimensions.w}
@@ -399,44 +384,43 @@ export default function KnowledgeGraph({ saves }) {
             />
 
             {/* ── Legend ── */}
-            <div className="kg-legend">
-                <div style={{ fontSize: '12px', fontWeight: 800, color: '#fff', marginBottom: '12px', letterSpacing: '-0.01em' }}>
+            <div className="absolute left-4 top-4 rounded-xl border border-white/10 bg-[#0e0e1a]/80 p-4 backdrop-blur-md">
+                <div className="mb-3 text-xs font-bold uppercase tracking-wide text-white">
                     Knowledge Graph
                 </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                <div className="flex flex-col gap-2">
                     {categoryStats.map(cat => (
-                        <div key={cat.name} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                            <div style={{
-                                width: '8px', height: '8px', borderRadius: '50%',
-                                background: cat.color, flexShrink: 0,
-                            }} />
-                            <span style={{ fontSize: '11px', color: 'rgba(255,255,255,0.6)', flex: 1 }}>{cat.name}</span>
-                            <span style={{ fontSize: '10px', fontFamily: 'monospace', color: 'rgba(255,255,255,0.3)' }}>{cat.count}</span>
+                        <div key={cat.name} className="flex items-center gap-2">
+                            <div className="h-2 w-2 rounded-full shadow-[0_0_8px]" style={{ background: cat.color, boxShadow: `0 0 8px ${cat.color}66` }} />
+                            <span className="flex-1 text-[11px] font-medium text-white/60">{cat.name}</span>
+                            <span className="text-[10px] font-mono text-white/30">{cat.count}</span>
                         </div>
                     ))}
-                    <div style={{ height: '1px', background: 'rgba(255,255,255,0.06)', margin: '4px 0' }} />
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#6b7280', flexShrink: 0 }} />
-                        <span style={{ fontSize: '11px', color: 'rgba(255,255,255,0.4)' }}>Tags</span>
-                    </div>
                 </div>
             </div>
 
             {/* ── Zoom controls ── */}
-            <div className="kg-controls">
-                <button onClick={zoomIn} className="kg-control-btn" title="Zoom in">
-                    <ZoomIn style={{ width: '16px', height: '16px' }} />
-                </button>
-                <button onClick={zoomOut} className="kg-control-btn" title="Zoom out">
-                    <ZoomOut style={{ width: '16px', height: '16px' }} />
-                </button>
-                <button onClick={zoomFit} className="kg-control-btn" title="Zoom to fit">
-                    <Maximize2 style={{ width: '16px', height: '16px' }} />
-                </button>
+            <div className="absolute bottom-4 right-4 flex flex-col gap-2">
+                {[
+                    { icon: ZoomIn, onClick: zoomIn, title: 'Zoom in' },
+                    { icon: ZoomOut, onClick: zoomOut, title: 'Zoom out' },
+                    { icon: Maximize2, onClick: zoomFit, title: 'Fit to screen' }
+                ].map(({ icon: Icon, onClick, title }, i) => (
+                    <Button
+                        key={i}
+                        variant="secondary"
+                        size="icon"
+                        onClick={onClick}
+                        title={title}
+                        className="h-8 w-8 rounded-lg border-white/10 bg-[#0e0e1a]/80 text-white/60 backdrop-blur-md hover:bg-white/10 hover:text-white"
+                    >
+                        <Icon className="h-4 w-4" />
+                    </Button>
+                ))}
             </div>
 
             {/* ── Tooltip ── */}
             {renderTooltip()}
-        </div>
+        </Card>
     )
 }

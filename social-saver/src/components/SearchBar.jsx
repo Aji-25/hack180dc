@@ -53,9 +53,9 @@ export default function SearchBar({ value, onChange, suggestions = [] }) {
     }
 
     return (
-        <div className="relative" ref={wrapRef}>
-            <div className="search-wrap">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-[15px] h-[15px] text-text-tertiary pointer-events-none" />
+        <div className="relative z-50" ref={wrapRef}>
+            <div className="relative group">
+                <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-white/30 group-focus-within:text-[var(--color-accent)] transition-colors pointer-events-none" />
                 <input
                     ref={inputRef}
                     type="text"
@@ -63,36 +63,41 @@ export default function SearchBar({ value, onChange, suggestions = [] }) {
                     onChange={handleChange}
                     onFocus={() => setShowSuggestions(true)}
                     placeholder="Search saves..."
-                    className="search-input"
+                    className="w-full bg-[#161616] md:bg-[#0e0e1a]/60 border border-white/10 rounded-xl py-3.5 pl-12 pr-12 text-base text-white placeholder-white/30 focus:outline-none focus:border-[var(--color-accent)]/50 focus:ring-1 focus:ring-[var(--color-accent)]/50 transition-all shadow-inner shadow-black/20"
                 />
                 {local ? (
                     <button
                         onClick={clear}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 text-text-tertiary hover:text-text-secondary transition-colors"
+                        className="absolute right-4 top-1/2 -translate-y-1/2 text-white/30 hover:text-white transition-colors p-1 rounded-full hover:bg-white/10"
                     >
-                        <X className="w-3.5 h-3.5" />
+                        <X className="w-4 h-4" />
                     </button>
                 ) : (
-                    <span className="kbd absolute right-3 top-1/2 -translate-y-1/2">/</span>
+                    <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none">
+                        <kbd className="hidden sm:inline-flex items-center justify-center h-6 min-w-[24px] px-1.5 text-[11px] font-medium text-white/20 bg-white/5 border border-white/5 rounded">
+                            /
+                        </kbd>
+                    </div>
                 )}
             </div>
 
             {/* Suggestions dropdown */}
             {showSuggestions && suggestions.length > 0 && !local && (
-                <div className="absolute top-full left-0 right-0 mt-1.5 z-30 bg-bg-raised border border-border rounded-lg shadow-xl overflow-hidden">
-                    <div className="px-3 py-2 border-b border-border-subtle">
-                        <span className="text-[11px] font-medium text-text-tertiary uppercase tracking-wider">
+                <div className="absolute top-full left-0 right-0 mt-2 z-50 bg-[#161616] border border-white/10 rounded-xl shadow-2xl shadow-black/80 overflow-hidden backdrop-blur-xl ring-1 ring-white/5">
+                    <div className="px-4 py-3 border-b border-white/5 bg-white/[0.02]">
+                        <span className="text-[11px] font-bold text-white/30 uppercase tracking-widest pl-1">
                             Suggestions
                         </span>
                     </div>
-                    <div className="py-1">
+                    <div className="p-1.5">
                         {suggestions.map((s, i) => (
                             <button
                                 key={i}
                                 onClick={() => selectSuggestion(s)}
-                                className="w-full text-left px-3 py-1.5 text-[13px] text-text-secondary hover:bg-bg-hover hover:text-text transition-colors"
+                                className="w-full text-left px-4 py-3 rounded-lg text-sm text-white/60 hover:bg-white/5 hover:text-white transition-all group flex items-center gap-3"
                             >
-                                {s}
+                                <Search className="w-4 h-4 opacity-0 group-hover:opacity-100 transition-opacity text-[var(--color-accent)]" />
+                                <span className="-ml-7 group-hover:ml-0 transition-all duration-300">{s}</span>
                             </button>
                         ))}
                     </div>

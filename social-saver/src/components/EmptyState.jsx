@@ -1,35 +1,41 @@
-import { ArrowUpRight } from 'lucide-react'
+import { ArrowUpRight, Inbox } from 'lucide-react'
+import { Button } from './ui/Button'
 
 export default function EmptyState({ search, category }) {
     const hasFilters = search || (category && category !== 'All')
 
     return (
-        <div className="flex flex-col items-center justify-center py-20 px-4">
+        <div className="flex flex-col items-center justify-center py-32 px-4">
             {hasFilters ? (
-                <>
-                    <p className="text-[15px] font-medium text-text mb-1">No matches</p>
-                    <p className="text-[13px] text-text-tertiary text-center max-w-xs">
-                        Try a different search term or clear the category filter.
-                    </p>
-                </>
-            ) : (
-                <>
-                    <div className="w-12 h-12 rounded-xl bg-bg-elevated border border-border-subtle flex items-center justify-center mb-4">
-                        <span className="text-xl">📩</span>
+                <div className="text-center">
+                    <div className="w-16 h-16 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center mx-auto mb-6 shadow-inner">
+                        <Inbox className="w-8 h-8 text-white/20" />
                     </div>
-                    <p className="text-[15px] font-medium text-text mb-1">No saves yet</p>
-                    <p className="text-[13px] text-text-tertiary text-center max-w-xs mb-4">
-                        Forward an Instagram link to the WhatsApp bot and it shows up here instantly.
+                    <h3 className="text-lg font-bold text-white mb-2">No matches found</h3>
+                    <p className="text-sm text-white/40 max-w-xs mx-auto">
+                        Try adjusting your search or clearing the category filter.
+                    </p>
+                </div>
+            ) : (
+                <div className="text-center">
+                    <div className="w-20 h-20 rounded-3xl bg-gradient-to-br from-[var(--color-accent)]/10 to-[var(--color-accent-2)]/10 border border-white/5 flex items-center justify-center mx-auto mb-8 shadow-[0_0_40px_rgba(124,109,250,0.1)]">
+                        <span className="text-4xl filter drop-shadow-lg">📩</span>
+                    </div>
+                    <h3 className="text-2xl font-bold text-white mb-3 tracking-tight">No saves yet</h3>
+                    <p className="text-white/50 text-base max-w-sm mx-auto mb-8 leading-relaxed">
+                        Your library is empty. Forward an Instagram link to the WhatsApp bot and it will appear here instantly.
                     </p>
                     <a
                         href="https://wa.me/14155238886"
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="btn btn-ghost text-[12px]"
+                        className="inline-block"
                     >
-                        Open WhatsApp <ArrowUpRight className="w-3 h-3" />
+                        <Button className="shadow-lg shadow-[var(--color-accent)]/20">
+                            Open WhatsApp <ArrowUpRight className="w-4 h-4 ml-2" />
+                        </Button>
                     </a>
-                </>
+                </div>
             )}
         </div>
     )

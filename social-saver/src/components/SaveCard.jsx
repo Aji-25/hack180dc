@@ -1,8 +1,13 @@
 import { useState, useRef, useEffect } from 'react'
-import { ArrowUpRight, Trash2, Share2, Pencil, Check, X, ChevronRight, Sparkles, Loader2 } from 'lucide-react'
+import { ArrowUpRight, Trash2, Share2, Pencil, Check, X, ChevronRight, Sparkles, Loader2, Link as LinkIcon, ExternalLink, BookOpen } from 'lucide-react'
+import { marked } from 'marked'
 import { SOURCE_LABELS } from '../lib/constants'
 import { supabase } from '../lib/supabase'
 import { useToast } from './Toast'
+import { Card, CardContent, CardFooter, CardHeader } from './ui/Card'
+import { Badge } from './ui/Badge'
+import { Button } from './ui/Button'
+import { cn } from '../lib/utils'
 
 function timeAgo(dateStr) {
     const seconds = Math.floor((Date.now() - new Date(dateStr).getTime()) / 1000)
@@ -21,6 +26,74 @@ const SOURCE_ICONS = {
     blog: '📄',
 }
 
+// Configure marked for clean rendering
+marked.setOptions({
+    breaks: true,
+    gfm: true,
+})
+
+// Deep Research Modal
+function ResearchModal({ dossier, title, onClose }) {
+    useEffect(() => {
+        const handleKey = (e) => { if (e.key === 'Escape') onClose() }
+        document.addEventListener('keydown', handleKey)
+        document.body.style.overflow = 'hidden'
+        return () => {
+            document.removeEventListener('keydown', handleKey)
+            document.body.style.overflow = ''
+        }
+    }, [onClose])
+
+    const htmlContent = marked.parse(dossier || '')
+
+    return (
+        <div
+            className="fixed inset-0 z-[200] flex items-start justify-center"
+            style={{ backdropFilter: 'blur(12px)', backgroundColor: 'rgba(0,0,0,0.75)' }}
+            onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
+        >
+            <div className="relative mt-12 mb-12 w-full max-w-2xl mx-4 rounded-2xl border border-white/10 bg-[#0e0e16] shadow-2xl flex flex-col max-h-[85vh]">
+                {/* Header */}
+                <div className="flex items-center justify-between px-6 py-4 border-b border-white/10">
+                    <div className="flex items-center gap-3">
+                        <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-[var(--color-accent)] to-[var(--color-accent-2)] shadow-lg">
+                            <Sparkles className="h-4.5 w-4.5 text-white" style={{ width: 18, height: 18 }} />
+                        </div>
+                        <div>
+                            <p className="text-[11px] font-bold uppercase tracking-widest text-[var(--color-accent)]">Deep Research</p>
+                            <p className="text-sm font-semibold text-white/90 leading-tight line-clamp-1">{title}</p>
+                        </div>
+                    </div>
+                    <button
+                        onClick={onClose}
+                        className="flex h-8 w-8 items-center justify-center rounded-full bg-white/5 text-white/60 hover:bg-red-500/80 hover:text-white transition-all"
+                        aria-label="Close"
+                    >
+                        <X className="h-4 w-4" />
+                    </button>
+                </div>
+
+                {/* Scrollable content */}
+                <div
+                    className="research-prose flex-1 overflow-y-auto px-6 py-5 custom-scrollbar"
+                    dangerouslySetInnerHTML={{ __html: htmlContent }}
+                />
+
+                {/* Footer */}
+                <div className="px-6 py-3 border-t border-white/5 flex items-center justify-between">
+                    <span className="text-[11px] text-white/30">Powered by Gemini 2.5 Flash</span>
+                    <button
+                        onClick={onClose}
+                        className="text-[12px] font-medium text-white/40 hover:text-white transition-colors"
+                    >
+                        Close
+                    </button>
+                </div>
+            </div>
+        </div>
+    )
+}
+
 export default function SaveCard({ save, onDelete, onUpdate }) {
     const { id, url, source, category, summary, tags, title, note, created_at, status, action_steps, error_msg } = save
     const [editing, setEditing] = useState(false)
@@ -28,6 +101,7 @@ export default function SaveCard({ save, onDelete, onUpdate }) {
     const [retrying, setRetrying] = useState(false)
     const [researching, setResearching] = useState(false)
     const [dossier, setDossier] = useState(null)
+    const [showModal, setShowModal] = useState(false)
     const inputRef = useRef(null)
     const toast = useToast()
 
@@ -77,7 +151,10 @@ export default function SaveCard({ save, onDelete, onUpdate }) {
             const edgeFnUrl = import.meta.env.VITE_EDGE_FUNCTION_URL || ''
             const res = await fetch(`${edgeFnUrl}/retry-classify`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`
+                },
                 body: JSON.stringify({ id }),
             })
             const data = await res.json()
@@ -98,13 +175,19 @@ export default function SaveCard({ save, onDelete, onUpdate }) {
             const edgeFnUrl = import.meta.env.VITE_EDGE_FUNCTION_URL || ''
             const res = await fetch(`${edgeFnUrl}/deep-research`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`
+                },
                 body: JSON.stringify({ query: title || summary }),
             })
             const data = await res.json()
             if (data.dossier) {
                 setDossier(data.dossier)
-                toast.success('Dossier Generated ✨')
+                setShowModal(true)
+                toast.success('Research ready ✨')
+            } else if (data.error) {
+                toast.error(data.error.includes('Rate limit') ? 'Rate limit reached (5/hr). Try later.' : 'Research failed')
             } else {
                 toast.error('Research failed')
             }
@@ -115,222 +198,194 @@ export default function SaveCard({ save, onDelete, onUpdate }) {
         setResearching(false)
     }
 
-    const handleAcceptPrediction = async () => {
-        try {
-            const newTags = (tags || []).filter(t => t !== 'predicted')
-            const { error } = await supabase.from('saves').update({ status: 'complete', tags: newTags }).eq('id', id)
-            if (!error && onUpdate) {
-                onUpdate({ ...save, status: 'complete', tags: newTags })
-                toast.success('Added to saves')
-            }
-        } catch (e) {
-            toast.error('Error accepting')
-        }
-    }
-
     const isPredicted = status === 'predicted' || (tags || []).includes('predicted')
     const hostname = (() => { try { return new URL(url).hostname.replace('www.', '') } catch { return url } })()
 
-    /* ─── Render ─── */
     return (
-        <div className="card group" style={{ display: 'flex', flexDirection: 'column', minHeight: '280px', height: '100%' }}>
-
-            {/* ── HEADER ── */}
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '24px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-                    <span style={{
-                        width: '42px', height: '42px', borderRadius: '50%',
-                        background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.06)',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        fontSize: '16px', flexShrink: 0,
-                    }}>
-                        {SOURCE_ICONS[source] || '🔗'}
-                    </span>
-                    <div>
-                        <div style={{ fontSize: '11px', fontWeight: 700, letterSpacing: '0.14em', textTransform: 'uppercase', color: '#7c6dfa' }}>
-                            {SOURCE_LABELS[source] || source}
+        <>
+            <Card className="group h-full flex flex-col hover:border-[var(--color-accent)]/30 transition-all duration-300">
+                {/* ── HEADER ── */}
+                <CardHeader className="flex-row items-start justify-between space-y-0 pb-3">
+                    <div className="flex items-center gap-3">
+                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-white/5 bg-white/5 text-lg shadow-inner">
+                            {SOURCE_ICONS[source] || '🔗'}
                         </div>
-                        <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.3)', marginTop: '3px', fontWeight: 500 }}>
-                            {timeAgo(created_at)}
-                        </div>
-                    </div>
-                </div>
-
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                    <span style={{
-                        fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.12em',
-                        padding: '6px 14px', borderRadius: '100px',
-                        background: 'rgba(255,255,255,0.04)', color: 'rgba(255,255,255,0.5)',
-                        border: '1px solid rgba(255,255,255,0.06)',
-                    }}>
-                        {category}
-                    </span>
-                    <span style={{
-                        width: '7px', height: '7px', borderRadius: '50%',
-                        background: status === 'error' ? '#ef4444' : '#22c55e',
-                        boxShadow: status === 'error' ? '0 0 8px rgba(239,68,68,0.5)' : '0 0 10px rgba(34,197,94,0.5)',
-                    }} />
-                </div>
-            </div>
-
-            {/* ── CONTENT ── */}
-            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                {/* Title / Summary */}
-                <h3 style={{
-                    fontSize: '17px', fontWeight: 500, lineHeight: 1.65,
-                    color: 'rgba(255,255,255,0.92)', margin: 0,
-                    display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden',
-                }}>
-                    {summary || title || 'Saved link'}
-                </h3>
-
-                {/* Hostname */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span style={{ width: '4px', height: '4px', borderRadius: '50%', background: 'rgba(124,109,250,0.5)' }} />
-                    <span style={{ fontSize: '12px', color: 'rgba(255,255,255,0.3)', fontWeight: 500 }}>
-                        {hostname}
-                    </span>
-                </div>
-
-                {/* Action Steps */}
-                {action_steps && action_steps.length > 0 && (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', paddingLeft: '6px', borderLeft: '2px solid rgba(124,109,250,0.15)', marginTop: '4px' }}>
-                        {action_steps.slice(0, 2).map((step, i) => (
-                            <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', paddingLeft: '14px' }}>
-                                <ChevronRight style={{ width: '14px', height: '14px', marginTop: '2px', color: 'rgba(124,109,250,0.6)', flexShrink: 0 }} />
-                                <span style={{ fontSize: '12px', color: 'rgba(255,255,255,0.55)', lineHeight: 1.6 }}>{step}</span>
-                            </div>
-                        ))}
-                    </div>
-                )}
-
-                {/* Dossier */}
-                {dossier && (
-                    <div style={{
-                        padding: '16px', borderRadius: '16px',
-                        background: 'rgba(124,109,250,0.06)', border: '1px solid rgba(124,109,250,0.12)',
-                    }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px', color: '#a78bfa', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em' }}>
-                            <Sparkles style={{ width: '12px', height: '12px' }} /> Deep Dive
-                        </div>
-                        <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.6)', lineHeight: 1.6, margin: 0, display: '-webkit-box', WebkitLineClamp: 4, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
-                            {dossier}
-                        </p>
-                    </div>
-                )}
-
-                {/* Error */}
-                {status === 'error' && error_msg && (
-                    <div style={{ padding: '12px 16px', borderRadius: '12px', background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.15)', color: '#fca5a5', fontSize: '12px' }}>
-                        ⚠️ {error_msg}
-                        <button onClick={handleRetry} style={{ marginLeft: '10px', textDecoration: 'underline', cursor: 'pointer', background: 'none', border: 'none', color: 'inherit', fontWeight: 600 }}>Retry</button>
-                    </div>
-                )}
-
-                {/* Tags */}
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', marginTop: '4px' }}>
-                    {tags && tags.slice(0, 3).map((tag, i) => (
-                        tag !== 'predicted' && (
-                            <span key={i} style={{
-                                fontSize: '11px', fontWeight: 500,
-                                padding: '5px 14px', borderRadius: '100px',
-                                background: 'rgba(167,139,250,0.08)', color: 'rgba(167,139,250,0.7)',
-                                border: '1px solid rgba(167,139,250,0.12)',
-                            }}>
-                                #{tag}
+                        <div className="flex flex-col">
+                            <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--color-accent)]">
+                                {SOURCE_LABELS[source] || source}
                             </span>
-                        )
-                    ))}
-                </div>
-            </div>
-
-            {/* ── FOOTER ── */}
-            <div style={{
-                marginTop: '28px', paddingTop: '20px',
-                borderTop: '1px solid rgba(255,255,255,0.04)',
-                display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '16px',
-            }}>
-                {/* Note */}
-                <div style={{ flex: 1, minWidth: 0 }}>
-                    {editing ? (
-                        <div style={{ display: 'flex', gap: '8px', alignItems: 'center', background: 'rgba(255,255,255,0.04)', padding: '6px 8px', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.08)' }}>
-                            <input
-                                ref={inputRef}
-                                type="text"
-                                value={noteText}
-                                onChange={e => setNoteText(e.target.value)}
-                                onKeyDown={e => {
-                                    if (e.key === 'Enter') saveNote()
-                                    if (e.key === 'Escape') { setEditing(false); setNoteText(note || '') }
-                                }}
-                                onBlur={saveNote}
-                                style={{ flex: 1, background: 'transparent', border: 'none', fontSize: '12px', color: '#fff', outline: 'none', height: '28px', fontFamily: 'inherit' }}
-                                placeholder="Type a note..."
-                            />
-                            <button onClick={saveNote} style={{ padding: '4px', borderRadius: '6px', background: 'none', border: 'none', color: '#22c55e', cursor: 'pointer' }}>
-                                <Check style={{ width: '14px', height: '14px' }} />
-                            </button>
+                            <span className="text-[11px] font-medium text-white/30">
+                                {timeAgo(created_at)}
+                            </span>
                         </div>
-                    ) : note ? (
-                        <div
-                            onClick={() => setEditing(true)}
-                            style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', padding: '6px 10px', borderRadius: '10px', marginLeft: '-10px' }}
-                            onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.04)'}
-                            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                        <Badge variant={category === 'Other' ? 'default' : 'secondary'} className="text-[10px] uppercase tracking-wider">
+                            {category}
+                        </Badge>
+                        <div className={cn(
+                            "h-2 w-2 rounded-full shadow-[0_0_8px]",
+                            status === 'error' ? "bg-red-500 shadow-red-500/50" : "bg-emerald-500 shadow-emerald-500/50"
+                        )} />
+                    </div>
+                </CardHeader>
+
+                {/* ── CONTENT ── */}
+                <CardContent className="flex-1 space-y-4">
+                    {/* Title / Summary */}
+                    <div className="space-y-1">
+                        <h3 className="line-clamp-3 text-[15px] font-medium leading-relaxed text-white/90 group-hover:text-white transition-colors">
+                            {summary || title || 'Saved link'}
+                        </h3>
+                        <a
+                            href={url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex items-center gap-1.5 text-xs font-medium text-[var(--color-accent)]/80 hover:text-[var(--color-accent)] hover:underline decoration-[var(--color-accent)]/30 underline-offset-2 transition-colors w-fit"
                         >
-                            <Pencil style={{ width: '13px', height: '13px', color: 'rgba(255,255,255,0.2)', flexShrink: 0 }} />
-                            <span style={{ fontSize: '12px', color: 'rgba(255,255,255,0.45)', fontStyle: 'italic', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                "{note}"
-                            </span>
+                            <LinkIcon className="h-3 w-3" />
+                            {hostname}
+                            <ExternalLink className="h-2.5 w-2.5 opacity-50" />
+                        </a>
+                    </div>
+
+                    {/* Action Steps */}
+                    {action_steps && action_steps.length > 0 && (
+                        <div className="space-y-2 rounded-lg border-l-2 border-[var(--color-accent)]/20 bg-[var(--color-accent)]/5 py-2 pr-2 pl-3">
+                            {action_steps.slice(0, 2).map((step, i) => (
+                                <div key={i} className="flex items-start gap-2">
+                                    <ChevronRight className="mt-1 h-3.5 w-3.5 shrink-0 text-[var(--color-accent)]/60" />
+                                    <span className="text-xs leading-relaxed text-white/60">{step}</span>
+                                </div>
+                            ))}
                         </div>
-                    ) : (
+                    )}
+
+                    {/* Research ready indicator (replaces inline dossier) */}
+                    {dossier && (
                         <button
-                            onClick={() => setEditing(true)}
-                            style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', fontWeight: 500, color: 'rgba(255,255,255,0.2)', background: 'none', border: 'none', cursor: 'pointer', padding: '6px 0', fontFamily: 'inherit' }}
-                            onMouseEnter={e => e.currentTarget.style.color = '#7c6dfa'}
-                            onMouseLeave={e => e.currentTarget.style.color = 'rgba(255,255,255,0.2)'}
+                            onClick={() => setShowModal(true)}
+                            className="w-full rounded-xl border border-[var(--color-accent)]/25 bg-gradient-to-r from-[var(--color-accent)]/10 to-[var(--color-accent-2)]/10 px-4 py-3 flex items-center gap-3 hover:from-[var(--color-accent)]/20 hover:to-[var(--color-accent-2)]/20 transition-all group/research cursor-pointer text-left"
                         >
-                            <Pencil style={{ width: '13px', height: '13px' }} /> Add note
+                            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-[var(--color-accent)] to-[var(--color-accent-2)]">
+                                <BookOpen className="h-4 w-4 text-white" />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                                <p className="text-[11px] font-bold uppercase tracking-wider text-[var(--color-accent)]">Research Ready</p>
+                                <p className="text-xs text-white/50 truncate">Click to read full dossier</p>
+                            </div>
+                            <ExternalLink className="h-3.5 w-3.5 text-white/30 group-hover/research:text-[var(--color-accent)] transition-colors shrink-0" />
                         </button>
                     )}
-                </div>
 
-                {/* Action Buttons */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                    {[
-                        { icon: Sparkles, onClick: handleResearch, title: 'Research', hoverBg: 'rgba(124,109,250,0.12)', hoverColor: '#7c6dfa', loading: researching },
-                        { icon: Share2, onClick: handleShare, title: 'Copy Link', hoverBg: 'rgba(255,255,255,0.06)', hoverColor: '#fff' },
-                        { icon: ArrowUpRight, onClick: () => window.open(url, '_blank'), title: 'Open', hoverBg: 'rgba(255,255,255,0.06)', hoverColor: '#fff' },
-                        { icon: Trash2, onClick: handleDelete, title: 'Delete', hoverBg: 'rgba(239,68,68,0.1)', hoverColor: '#f87171' },
-                    ].map(({ icon: Icon, onClick, title: t, hoverBg, hoverColor, loading: ld }, i) => (
-                        <button
-                            key={i}
-                            onClick={onClick}
-                            title={t}
-                            disabled={ld}
-                            style={{
-                                padding: '8px', borderRadius: '10px', background: 'none', border: 'none',
-                                color: 'rgba(255,255,255,0.18)', cursor: 'pointer',
-                                transition: 'all 0.2s', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                            }}
-                            onMouseEnter={e => { e.currentTarget.style.background = hoverBg; e.currentTarget.style.color = hoverColor; e.currentTarget.style.transform = 'scale(1.1)' }}
-                            onMouseLeave={e => { e.currentTarget.style.background = 'none'; e.currentTarget.style.color = 'rgba(255,255,255,0.18)'; e.currentTarget.style.transform = 'scale(1)' }}
+                    {/* Error */}
+                    {status === 'error' && error_msg && (
+                        <div className="flex items-center justify-between rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-300">
+                            <span className="flex items-center gap-2">⚠️ {error_msg}</span>
+                            <button onClick={handleRetry} className="font-semibold underline decoration-red-300/30 hover:text-red-200">Retry</button>
+                        </div>
+                    )}
+
+                    {/* Tags */}
+                    <div className="flex flex-wrap gap-1.5 pt-1">
+                        {tags && tags.slice(0, 3).map((tag, i) => (
+                            tag !== 'predicted' && (
+                                <span key={i} className="rounded-full border border-white/5 bg-white/5 px-2.5 py-0.5 text-[10px] font-medium text-white/40 group-hover:border-white/10 group-hover:text-white/60 transition-colors">
+                                    #{tag}
+                                </span>
+                            )
+                        ))}
+                    </div>
+                </CardContent>
+
+                {/* ── FOOTER ── */}
+                <CardFooter className="border-t border-white/5 pt-4 mt-auto justify-between gap-3">
+                    {/* Note */}
+                    <div className="flex-1 min-w-0">
+                        {editing ? (
+                            <div className="flex items-center gap-1 rounded-lg border border-white/10 bg-white/5 p-1 pr-1.5 focus-within:border-[var(--color-accent)]/50 focus-within:ring-1 focus-within:ring-[var(--color-accent)]/50 transition-all">
+                                <input
+                                    ref={inputRef}
+                                    type="text"
+                                    value={noteText}
+                                    onChange={e => setNoteText(e.target.value)}
+                                    onKeyDown={e => {
+                                        if (e.key === 'Enter') saveNote()
+                                        if (e.key === 'Escape') { setEditing(false); setNoteText(note || '') }
+                                    }}
+                                    onBlur={saveNote}
+                                    className="flex-1 bg-transparent px-2 py-1 text-xs text-white placeholder-white/20 outline-none"
+                                    placeholder="Type a note..."
+                                />
+                                <button onClick={saveNote} className="rounded p-1 text-emerald-400 hover:bg-emerald-400/10">
+                                    <Check className="h-3.5 w-3.5" />
+                                </button>
+                            </div>
+                        ) : note ? (
+                            <div
+                                onClick={() => setEditing(true)}
+                                className="group/note flex cursor-pointer items-center gap-2 rounded-lg py-1.5 pl-0 pr-2 hover:bg-white/5 -ml-2 px-2 transition-colors"
+                            >
+                                <Pencil className="h-3 w-3 shrink-0 text-white/20 group-hover/note:text-[var(--color-accent)]" />
+                                <span className="truncate text-xs italic text-white/50 group-hover/note:text-white/80 transition-colors">
+                                    "{note}"
+                                </span>
+                            </div>
+                        ) : (
+                            <button
+                                onClick={() => setEditing(true)}
+                                className="group/add flex items-center gap-2 py-1.5 text-xs font-medium text-white/30 hover:text-[var(--color-accent)] transition-colors"
+                            >
+                                <Pencil className="h-3 w-3 transition-transform group-hover/add:scale-110" />
+                                <span>Add note</span>
+                            </button>
+                        )}
+                    </div>
+
+                    {/* Actions */}
+                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+                        <Button
+                            variant="ghost"
+                            size="icon"
+                            className={cn(
+                                "h-8 w-8 hover:bg-[var(--color-accent)]/10 transition-all",
+                                dossier ? "text-[var(--color-accent)]" : "text-white/40 hover:text-[var(--color-accent)]"
+                            )}
+                            onClick={dossier ? () => setShowModal(true) : handleResearch}
+                            disabled={researching}
+                            title={dossier ? "View Research" : "Deep Research"}
                         >
-                            {ld ? <Loader2 style={{ width: '16px', height: '16px', animation: 'spin 1s linear infinite' }} /> : <Icon style={{ width: '16px', height: '16px' }} />}
-                        </button>
-                    ))}
-                </div>
-            </div>
+                            {researching ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+                        </Button>
+                        <Button variant="ghost" size="icon" className="h-8 w-8 text-white/40 hover:text-white" onClick={handleShare} title="Copy Link">
+                            <Share2 className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button variant="ghost" size="icon" className="h-8 w-8 text-white/40 hover:text-red-400 hover:bg-red-400/10" onClick={handleDelete} title="Delete">
+                            <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                    </div>
+                </CardFooter>
 
-            {/* Predicted indicator */}
-            {isPredicted && (
-                <div style={{ position: 'absolute', top: '-4px', right: '-4px' }}>
-                    <span style={{ position: 'relative', display: 'flex', width: '12px', height: '12px' }}>
-                        <span style={{ position: 'absolute', display: 'inline-flex', width: '100%', height: '100%', borderRadius: '50%', background: '#22c55e', opacity: 0.7, animation: 'ping 1s cubic-bezier(0,0,0.2,1) infinite' }} />
-                        <span style={{ position: 'relative', display: 'inline-flex', width: '12px', height: '12px', borderRadius: '50%', background: '#22c55e' }} />
-                    </span>
-                </div>
+                {/* Predicted Indicator */}
+                {isPredicted && (
+                    <div className="absolute top-3 right-3">
+                        <span className="relative flex h-2.5 w-2.5">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                            <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+                        </span>
+                    </div>
+                )}
+            </Card>
+
+            {/* Research Modal — rendered outside card */}
+            {dossier && showModal && (
+                <ResearchModal
+                    dossier={dossier}
+                    title={title || summary || 'Research'}
+                    onClose={() => setShowModal(false)}
+                />
             )}
-        </div>
+        </>
     )
 }

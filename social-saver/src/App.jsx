@@ -16,6 +16,8 @@ import EmptyState from './components/EmptyState'
 import LandingPage from './components/LandingPage'
 import KnowledgeGraph from './components/KnowledgeGraph'
 import { Download, LayoutGrid, Layers, Network } from 'lucide-react'
+import { Button } from './components/ui/Button'
+import { cn } from './lib/utils'
 
 // Mock data for local dev / demo when Supabase isn't connected
 const MOCK_SAVES = [
@@ -260,90 +262,88 @@ function App() {
     }
 
     return (
-        <div className="min-h-screen flex flex-col">
+        <div className="flex min-h-screen flex-col bg-[var(--color-bg)] text-[#f0f0ff] antialiased selection:bg-[var(--color-accent)]/30 selection:text-white">
             <OnboardingOverlay />
             <Header totalSaves={stats.total} stats={stats} userPhone={userPhone} onLogoClick={() => setShowLanding(true)} />
 
-            <main className="flex-1 w-full">
-                <div style={{ maxWidth: '1152px', margin: '0 auto', padding: '40px 24px' }}>
-                    {/* Ask My Saves */}
-                    <AskSaves saves={useMock ? MOCK_SAVES : saves} onFilterResults={setAskResults} />
-
-                    {/* Section divider */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '16px', margin: '48px 0' }}>
-                        <div style={{ flex: 1, height: '1px', background: 'rgba(255,255,255,0.08)' }} />
-                        <span style={{
-                            fontSize: '13px',
-                            color: 'var(--color-text-secondary)',
-                            letterSpacing: '0.1em',
-                            textTransform: 'uppercase',
-                            fontWeight: 700,
-                        }}>Your Saves</span>
-                        <div style={{ flex: 1, height: '1px', background: 'rgba(255,255,255,0.08)' }} />
+            <main className="flex-1 pt-24 pb-12">
+                <div className="mx-auto max-w-6xl px-6">
+                    {/* Ask My Saves - Hero Section */}
+                    <div className="mb-12">
+                        <AskSaves saves={useMock ? MOCK_SAVES : saves} onFilterResults={setAskResults} />
                     </div>
 
-                    {/* Controls */}
-                    <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center mb-5">
-                        <div className="flex-1 w-full">
-                            <SearchBar value={search} onChange={setSearch} suggestions={searchSuggestions} />
-                        </div>
-                        <div className="flex items-center gap-2">
-                            <RecapModal userPhone={userPhone} useMock={useMock} />
-                            <RandomInspiration userPhone={userPhone} />
+                    {/* Section Header */}
+                    <div className="mb-6 flex items-center gap-4">
+                        <div className="h-px flex-1 bg-gradient-to-r from-transparent via-white/10 to-transparent" />
+                        <span className="text-xs font-bold uppercase tracking-widest text-[#5a5a80]">
+                            Your Content Library
+                        </span>
+                        <div className="h-px flex-1 bg-gradient-to-r from-transparent via-white/10 to-transparent" />
+                    </div>
+
+                    {/* Filters & Controls */}
+                    <div className="mb-8 rounded-2xl border border-white/5 bg-[#0e0e1a]/40 backdrop-blur-xl shadow-2xl shadow-black/20 relative z-20">
+                        <div className="flex flex-col gap-0 p-1">
+                            {/* Search & Actions Row */}
+                            <div className="flex flex-col md:flex-row gap-4 p-4 pb-2">
+                                <div className="flex-1 relative z-30">
+                                    <SearchBar value={search} onChange={setSearch} suggestions={searchSuggestions} />
+                                </div>
+                                <div className="flex items-center gap-2 pl-0 md:pl-2">
+                                    <RecapModal userPhone={userPhone} useMock={useMock} />
+                                    <RandomInspiration userPhone={userPhone} />
+                                </div>
+                            </div>
+
+                            {/* Filter Bar Row */}
+                            <div className="flex flex-col gap-3 px-4 pb-4 pt-1 lg:flex-row lg:items-center lg:justify-between relative z-10">
+                                <div className="flex flex-1 flex-col gap-3 lg:flex-row lg:items-center overflow-x-auto scrollbar-none">
+                                    <QuickFilters active={quickFilters} onToggle={toggleQuickFilter} />
+                                    <div className="hidden h-4 w-px bg-white/5 lg:block" />
+                                    <CategoryChips selected={category} onSelect={setCategory} counts={stats.categories} />
+                                </div>
+
+                                {/* View Toggles */}
+                                <div className="hidden lg:flex shrink-0 items-center gap-1 rounded-lg border border-white/5 bg-[#080810]/50 p-1 ml-auto">
+                                    {[
+                                        { id: 'grid', icon: LayoutGrid, title: 'Grid View' },
+                                        { id: 'collections', icon: Layers, title: 'Collections' },
+                                        { id: 'graph', icon: Network, title: 'Knowledge Graph' }
+                                    ].map(({ id, icon: Icon, title }) => (
+                                        <button
+                                            key={id}
+                                            onClick={() => setViewMode(id)}
+                                            title={title}
+                                            className={cn(
+                                                "flex items-center justify-center rounded-md p-1.5 transition-all",
+                                                viewMode === id
+                                                    ? "bg-[var(--color-accent)]/20 text-[var(--color-accent-2)] shadow-sm"
+                                                    : "text-[#5a5a80] hover:bg-white/5 hover:text-[#9090b8]"
+                                            )}
+                                        >
+                                            <Icon className="h-3.5 w-3.5" />
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
                         </div>
                     </div>
 
-                    {/* Quick Filters + View Toggle */}
-                    <div className="flex items-center justify-between mb-6 gap-3">
-                        <div className="flex-1 min-w-0">
-                            <QuickFilters active={quickFilters} onToggle={toggleQuickFilter} />
-                        </div>
-                        <div className="view-toggle shrink-0">
-                            <button
-                                onClick={() => setViewMode('grid')}
-                                className={viewMode === 'grid' ? 'active' : ''}
-                                title="Grid view"
-                            >
-                                <LayoutGrid className="w-3.5 h-3.5" />
-                            </button>
-                            <button
-                                onClick={() => setViewMode('collections')}
-                                className={viewMode === 'collections' ? 'active' : ''}
-                                title="Collections"
-                            >
-                                <Layers className="w-3.5 h-3.5" />
-                            </button>
-                            <button
-                                onClick={() => setViewMode('graph')}
-                                className={viewMode === 'graph' ? 'active' : ''}
-                                title="Knowledge Graph (Beta)"
-                            >
-                                <Network className="w-3.5 h-3.5" />
-                            </button>
-                        </div>
-                    </div>
-
-                    {/* Category Chips */}
-                    <div style={{ marginBottom: '32px' }}>
-                        <CategoryChips selected={category} onSelect={setCategory} counts={stats.categories} />
-                    </div>
-
-                    {/* Content */}
+                    {/* Content Area */}
                     {loading ? (
-                        <div className="saves-grid">
+                        <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
                             {[...Array(6)].map((_, i) => (
-                                <div key={i} className="card p-5 flex flex-col gap-3" style={{ minHeight: '200px' }}>
-                                    <div className="flex items-center gap-2">
-                                        <div className="skel h-3 w-14 rounded-full" />
-                                        <div className="skel h-2 w-2 rounded-full" />
+                                <div key={i} className="flex h-56 flex-col gap-4 rounded-2xl border border-white/5 bg-[#0e0e1a]/40 p-6">
+                                    <div className="flex items-center gap-3">
+                                        <div className="h-3 w-16 animate-pulse rounded-full bg-white/5" />
+                                        <div className="h-2 w-2 animate-pulse rounded-full bg-white/5" />
                                     </div>
-                                    <div className="skel h-5 w-20 rounded-full" />
-                                    <div className="skel h-3 w-full rounded" />
-                                    <div className="skel h-3 w-4/5 rounded" />
-                                    <div className="skel h-3 w-3/5 rounded" />
-                                    <div className="flex gap-1.5 mt-auto pt-2">
-                                        <div className="skel h-4 w-12 rounded-full" />
-                                        <div className="skel h-4 w-16 rounded-full" />
+                                    <div className="h-6 w-32 animate-pulse rounded-lg bg-white/10" />
+                                    <div className="space-y-2">
+                                        <div className="h-3 w-full animate-pulse rounded bg-white/5" />
+                                        <div className="h-3 w-4/5 animate-pulse rounded bg-white/5" />
+                                        <div className="h-3 w-3/5 animate-pulse rounded bg-white/5" />
                                     </div>
                                 </div>
                             ))}
@@ -355,7 +355,7 @@ function App() {
                             ) : viewMode === 'collections' ? (
                                 <CollectionsView saves={displaySaves} onDelete={handleDelete} onUpdate={handleUpdate} />
                             ) : (
-                                <div className="saves-grid">
+                                <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
                                     {displaySaves.map(save => (
                                         <SaveCard key={save.id} save={save} onDelete={handleDelete} onUpdate={handleUpdate} />
                                     ))}
@@ -363,11 +363,16 @@ function App() {
                             )}
 
                             {/* Export */}
-                            <div className="flex justify-end mt-6">
-                                <button onClick={exportCSV} className="btn btn-ghost text-[12px]" style={{ gap: '6px' }}>
-                                    <Download className="w-3.5 h-3.5" />
-                                    Export CSV
-                                </button>
+                            <div className="mt-8 flex justify-center">
+                                <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={exportCSV}
+                                    className="text-xs text-[#5a5a80] hover:text-[#9090b8]"
+                                >
+                                    <Download className="mr-2 h-3.5 w-3.5" />
+                                    Export to CSV
+                                </Button>
                             </div>
                         </>
                     ) : (
@@ -377,15 +382,19 @@ function App() {
             </main>
 
             {/* Footer */}
-            <footer style={{ borderTop: '1px solid var(--color-border-subtle)', marginTop: '24px' }}>
-                <div style={{ maxWidth: '1152px', margin: '0 auto', padding: '16px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <div className="flex items-center gap-2">
-                        <span style={{ fontSize: '12px', fontWeight: 700, letterSpacing: '-0.01em', background: 'linear-gradient(135deg, #7c6dfa, #f472b6)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
+            <footer className="mt-12 border-t border-white/5 bg-[#080810] py-8">
+                <div className="mx-auto flex max-w-6xl items-center justify-between px-6">
+                    <div className="flex items-center gap-3">
+                        <span className="bg-gradient-to-r from-[var(--color-accent)] to-[var(--color-accent-2)] bg-clip-text text-sm font-bold text-transparent">
                             Social Saver
                         </span>
-                        <span className="footer-text opacity-50">— save links via WhatsApp</span>
+                        <span className="text-xs font-medium text-[#5a5a80]">
+                            — save links via WhatsApp
+                        </span>
                     </div>
-                    <span className="footer-text" style={{ opacity: 0.4 }}>Built for Hack180 ✦</span>
+                    <span className="text-xs font-medium text-[#5a5a80]/60">
+                        Built for Hack180 ✦
+                    </span>
                 </div>
             </footer>
         </div>
