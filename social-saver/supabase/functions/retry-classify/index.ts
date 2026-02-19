@@ -101,18 +101,44 @@ serve(async (req: Request) => {
             // Keep existing
         }
 
+        // Generate Embedding
+        let embedding = null;
+        try {
+            const textToEmbed = `${title || save.title} ${category} ${summary} ${tags.join(" ")}`;
+            const embeddingRes = await fetch("https://api.openai.com/v1/embeddings", {
+                method: "POST",
+                headers: {
+                    Authorization: `Bearer ${Deno.env.get("OPENAI_API_KEY")}`,
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                    model: "text-embedding-3-small",
+                    input: textToEmbed,
+                }),
+            });
+            const embData = await embeddingRes.json();
+            if (embData.data?.[0]?.embedding) {
+                embedding = embData.data[0].embedding;
+            }
+        } catch (e) {
+            console.error("Embedding generation failed:", e);
+        }
+
         // Update the save
+        const updatePayload: any = {
+            title: title || save.title,
+            raw_text: rawText || save.raw_text,
+            category,
+            tags,
+            summary,
+            status: "complete",
+            error_msg: null,
+        };
+        if (embedding) updatePayload.embedding = embedding;
+
         const { error: updateErr } = await supabase
             .from("saves")
-            .update({
-                title: title || save.title,
-                raw_text: rawText || save.raw_text,
-                category,
-                tags,
-                summary,
-                status: "complete",
-                error_msg: null,
-            })
+            .update(updatePayload)
             .eq("id", id);
 
         if (updateErr) throw updateErr;

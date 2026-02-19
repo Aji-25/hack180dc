@@ -1,7 +1,12 @@
 // @ts-nocheck
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 
 const OPENAI_API_KEY = Deno.env.get('OPENAI_API_KEY')!
+const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
+const SUPABASE_SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+
+const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 
 const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
@@ -14,21 +19,46 @@ serve(async (req) => {
     }
 
     try {
-        const { query, context } = await req.json()
+        const { query } = await req.json()
 
-        // context is an array of simplified saves: { title, summary, category, tags }
+        if (!query) throw new Error('Query required')
 
-        const systemPrompt = `You are a helpful AI assistant with access to a user's saved bookmarks (their "second brain").
+        // 1. Generate Embedding for Query
+        const embeddingRes = await fetch('https://api.openai.com/v1/embeddings', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${OPENAI_API_KEY}`,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                model: 'text-embedding-3-small',
+                input: query,
+            }),
+        })
+        const embeddingData = await embeddingRes.json()
+        const queryEmbedding = embeddingData.data[0].embedding
+
+        // 2. Search Supabase (Vector Search)
+        const { data: contextSaves, error: searchError } = await supabase.rpc('match_saves', {
+            query_embedding: queryEmbedding,
+            match_threshold: 0.5, // adjust based on results
+            match_count: 8,
+        })
+
+        if (searchError) throw searchError
+
+        // 3. Generate Answer
+        const systemPrompt = `You are a "Second Brain" AI assistant.
 User Query: "${query}"
 
-Your goal is to Answer the query using ONLY the provided context.
-- If the user asks to "draft", "write", "create", or "compose", generate the content based on the context.
-- Cite your sources by title if relevant.
+Your goal is to Answer the query using ONLY the provided context (Vector Search Results).
+- You have access to these semantic matches from the user's database.
+- Reference specific saves by title.
+- Synthesize information across multiple saves.
 - Be concise and actionable.
-- If the context doesn't have enough info, say so politely.
 
 Context:
-${context.map((s: any) => `- [${s.category}] ${s.title || 'Untitled'}: ${s.summary} (Tags: ${s.tags?.join(', ')})`).join('\n')}
+${contextSaves?.map((s: any) => `- [${s.category}] ${s.title}: ${s.summary} (Similarity: ${(s.similarity * 100).toFixed(0)}%)`).join('\n') || 'No relevant saves found.'}
 `
 
         const response = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -44,14 +74,13 @@ ${context.map((s: any) => `- [${s.category}] ${s.title || 'Untitled'}: ${s.summa
                     { role: 'user', content: query }
                 ],
                 temperature: 0.7,
-                stream: false,
             }),
         })
 
         const data = await response.json()
         const reply = data.choices[0].message.content
 
-        return new Response(JSON.stringify({ reply }), {
+        return new Response(JSON.stringify({ reply, references: contextSaves }), {
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         })
 

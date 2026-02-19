@@ -446,12 +446,38 @@ Deno.serve(async (req) => {
                             status,
                         },
                         { onConflict: "user_phone,url_hash", ignoreDuplicates: false }
-                    );
+                    )
+                    .select()
+                    .single();
 
                 if (error) {
                     console.error("Supabase insert error:", error);
                     results.push(`⚠️ Error saving: ${url}`);
                     continue;
+                }
+
+                // 🧠 Generate Embedding (Fire and forget, or await)
+                if (data?.id) {
+                    try {
+                        const textToEmbed = `${metadata.title || ''} ${classification.category} ${classification.summary} ${classification.tags.join(' ')}`;
+                        const embeddingRes = await fetch('https://api.openai.com/v1/embeddings', {
+                            method: 'POST',
+                            headers: {
+                                'Authorization': `Bearer ${OPENAI_API_KEY}`,
+                                'Content-Type': 'application/json',
+                            },
+                            body: JSON.stringify({
+                                model: 'text-embedding-3-small',
+                                input: textToEmbed,
+                            }),
+                        });
+                        const embData = await embeddingRes.json();
+                        if (embData.data?.[0]?.embedding) {
+                            await supabase.from('saves').update({ embedding: embData.data[0].embedding }).eq('id', data.id);
+                        }
+                    } catch (e) {
+                        console.error('Embedding generation failed:', e);
+                    }
                 }
 
                 const emoji = CATEGORY_EMOJIS[classification.category] || "📌";

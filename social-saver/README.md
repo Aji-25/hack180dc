@@ -30,6 +30,7 @@ Social Saver is a full-stack AI-powered bookmark manager that lets users save, c
 - **✨ Weekly AI Recap** — 5-bullet personalized summary of your week's saves
 - **🎯 Action Steps** — Fitness/Food/Coding saves include 2-4 actionable steps
 - **📂 Collections View** — Auto-group saves by category with collapsible sections
+- **🧠 Vector Search (RAG)** — Semantic search that understands "how to get strong" matches "gym routine" (using OpenAI Embeddings)
 - **🕸️ Knowledge Graph** — Visualise your second brain with an interactive force-directed graph
 - **🕵️ Deep Research Agent** — AI generates a "Research Dossier" (counter-arguments, academic context) for any save
 - **🔮 Predictive Context** — Anticipates your needs (e.g., Save flight → Suggests hotels) automatically
