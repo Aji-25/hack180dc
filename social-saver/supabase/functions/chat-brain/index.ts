@@ -1,11 +1,17 @@
 // @ts-nocheck
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
+// chat-brain: Hybrid Vector + Graph-RAG retrieval.
+// Falls back gracefully to vector-only if Neo4j is not configured.
+// Returns full retrieval telemetry for debugging and UI display.
+
+import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import {
+    runCypher, isNeo4jConfigured, matchEntityKeys, normalizeEntityName, entityKey
+} from '../_shared/neo4j.ts'
 
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY')!
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const SUPABASE_SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 
 const corsHeaders = {
@@ -13,156 +19,366 @@ const corsHeaders = {
     'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
-// Rate limiting: 10 queries per user per hour
+// ── Rate limiting ────────────────────────────────────────────────────────────
 async function checkRateLimit(identifier: string): Promise<boolean> {
     const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString()
-
     const { data } = await supabase
-        .from('rate_limits')
-        .select('request_count')
-        .eq('identifier', identifier)
-        .eq('endpoint', 'chat-brain')
-        .gte('window_start', oneHourAgo)
-        .single()
-
+        .from('rate_limits').select('request_count')
+        .eq('identifier', identifier).eq('endpoint', 'chat-brain')
+        .gte('window_start', oneHourAgo).single()
     if (data && data.request_count >= 10) return false
-
     if (data) {
-        await supabase
-            .from('rate_limits')
+        await supabase.from('rate_limits')
             .update({ request_count: data.request_count + 1 })
-            .eq('identifier', identifier)
-            .eq('endpoint', 'chat-brain')
+            .eq('identifier', identifier).eq('endpoint', 'chat-brain')
             .gte('window_start', oneHourAgo)
     } else {
         await supabase.from('rate_limits').insert({
-            identifier,
-            endpoint: 'chat-brain',
-            request_count: 1,
+            identifier, endpoint: 'chat-brain', request_count: 1,
             window_start: new Date().toISOString(),
         })
     }
     return true
 }
 
-// Generate embedding using Gemini gemini-embedding-001
+// ── Gemini helpers ───────────────────────────────────────────────────────────
 async function generateEmbedding(text: string): Promise<number[]> {
-    const response = await fetch(
+    const res = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent?key=${GEMINI_API_KEY}`,
         {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 model: 'models/gemini-embedding-001',
-                content: {
-                    parts: [{ text }]
-                },
+                content: { parts: [{ text }] },
             }),
         }
     )
-
-    if (!response.ok) {
-        const errorText = await response.text()
-        console.error('Gemini Embedding Error:', errorText)
-        throw new Error(`Gemini Embedding Error: ${response.statusText}`)
-    }
-
-    const data = await response.json()
+    if (!res.ok) throw new Error(`Embedding error: ${res.statusText}`)
+    const data = await res.json()
     return data.embedding.values
 }
 
-serve(async (req) => {
-    if (req.method === 'OPTIONS') {
-        return new Response('ok', { headers: corsHeaders })
+// Query entity + intent extraction
+const QUERY_EXTRACT_PROMPT = (query: string) => `Extract entities and intent from this search query for a personal knowledge base.
+
+Query: "${query}"
+
+Return ONLY valid JSON:
+{
+  "query_entities": [
+    {"name": "string", "type": "tool|concept|topic|exercise|food|brand|person|other", "confidence": 0.9}
+  ],
+  "intent": "find|summarize|compare|draft|plan",
+  "require_all": true,
+  "filters": {
+    "category": null,
+    "source": null
+  }
+}
+
+Rules:
+- Extract 1-5 entities max
+- Set require_all=true only if the query contains "and" between concepts
+- category must be one of: Fitness, Coding, Food, Travel, Design, Business, Self-Improvement, Other — or null
+- confidence 0.0-1.0`
+
+async function extractQueryEntities(query: string): Promise<{
+    entities: Array<{ name: string; type: string; confidence: number }>;
+    intent: string;
+    require_all: boolean;
+    filters: { category: string | null; source: string | null };
+}> {
+    try {
+        const res = await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,
+            {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    contents: [{ role: 'user', parts: [{ text: QUERY_EXTRACT_PROMPT(query) }] }],
+                    generationConfig: {
+                        temperature: 0.1, maxOutputTokens: 512,
+                        responseMimeType: 'application/json',
+                    },
+                }),
+            }
+        )
+        if (!res.ok) throw new Error('extraction failed')
+        const data = await res.json()
+        const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '{}'
+        const parsed = JSON.parse(text)
+        return {
+            entities: (parsed.query_entities || []).slice(0, 5),
+            intent: parsed.intent || 'find',
+            require_all: parsed.require_all ?? false,
+            filters: parsed.filters || { category: null, source: null },
+        }
+    } catch (e) {
+        console.warn('[chat-brain] entity extraction failed, falling back:', e.message)
+        return { entities: [], intent: 'find', require_all: false, filters: { category: null, source: null } }
+    }
+}
+
+// ── Graph retrieval ──────────────────────────────────────────────────────────
+async function graphRetrieval(
+    phone: string,
+    queryEntities: Array<{ name: string; confidence: number }>,
+    requireAll: boolean,
+    limit: number = 8
+): Promise<{
+    saves: any[];
+    entityKeys: string[];
+    matchedEntityNames: string[];
+}> {
+    if (!isNeo4jConfigured() || queryEntities.length === 0) {
+        return { saves: [], entityKeys: [], matchedEntityNames: [] }
     }
 
-    try {
-        const { query } = await req.json()
+    // Stage 1: match each query entity to Neo4j entity keys
+    const matchedKeys: string[] = []
+    const matchedNames: string[] = []
 
-        if (!query) throw new Error('Query required')
+    for (const qe of queryEntities) {
+        const keys = await matchEntityKeys(phone, qe.name)
+        if (keys.length > 0) {
+            matchedKeys.push(...keys)
+            matchedNames.push(qe.name)
+        }
+    }
+
+    if (matchedKeys.length === 0) {
+        return { saves: [], entityKeys: [], matchedEntityNames: [] }
+    }
+
+    const minMatch = requireAll ? Math.min(matchedKeys.length, queryEntities.length) : 1
+
+    // Multi-entity intersection query (AND support)
+    const intersectionRows = await runCypher(`
+        MATCH (u:User {phone: $phone})-[:SAVED]->(s:Save)
+        MATCH (s)-[:MENTIONS]->(e:Entity {user_phone: $phone})
+        WHERE e.key IN $entity_keys
+        WITH s, collect(DISTINCT e.key) AS matched_keys,
+                collect(DISTINCT e.name) AS matched_names
+        WHERE size(matched_keys) >= $min_match
+        RETURN
+            s.id        AS save_id,
+            s.title     AS title,
+            s.summary   AS summary,
+            s.url       AS url,
+            s.source    AS source,
+            size(matched_keys) AS match_count,
+            matched_names AS matched_entities
+        ORDER BY match_count DESC
+        LIMIT $limit
+    `, { phone, entity_keys: matchedKeys, min_match: minMatch, limit })
+
+    // 2-hop expansion for 1-entity queries (find related via co-occurrence)
+    let hopRows: any[] = []
+    if (!requireAll && matchedKeys.length <= 2) {
+        hopRows = await runCypher(`
+            MATCH (e1:Entity {user_phone: $phone})
+            WHERE e1.key IN $entity_keys
+            MATCH (e1)-[r:CO_OCCURS_WITH]-(e2:Entity {user_phone: $phone})
+            WHERE r.weight >= 0.8
+            MATCH (s:Save)-[:MENTIONS]->(e2)
+            MATCH (u:User {phone: $phone})-[:SAVED]->(s)
+            RETURN
+                s.id            AS save_id,
+                s.title         AS title,
+                s.summary       AS summary,
+                s.url           AS url,
+                s.source        AS source,
+                round(r.weight * 0.7, 2) AS match_count,
+                [e2.name]       AS matched_entities
+            LIMIT $limit
+        `, { phone, entity_keys: matchedKeys, limit })
+    }
+
+    // Deduplicate and merge
+    const seen = new Set<string>()
+    const saves: any[] = []
+    for (const row of [...intersectionRows, ...hopRows]) {
+        if (!seen.has(row.save_id)) {
+            seen.add(row.save_id)
+            saves.push({
+                id: row.save_id,
+                title: row.title,
+                summary: row.summary,
+                url: row.url,
+                source: row.source,
+                graph_score: row.match_count,
+                matched_entities: row.matched_entities || [],
+                retrieval_source: 'graph',
+            })
+        }
+    }
+
+    return { saves, entityKeys: matchedKeys, matchedEntityNames: matchedNames }
+}
+
+// ── Answer generation ────────────────────────────────────────────────────────
+async function generateAnswer(
+    query: string,
+    mergedSaves: any[],
+    entities: string[]
+): Promise<string> {
+    const contextText = mergedSaves.length > 0
+        ? mergedSaves.map((s, i) =>
+            `[${i + 1}] (${s.source || 'link'} / ${s.retrieval_source || 'vector'}) ${s.title}: ${s.summary}`
+        ).join('\n')
+        : 'No relevant saves found.'
+
+    const entityContext = entities.length > 0
+        ? `Key entities from your query: ${entities.join(', ')}.`
+        : ''
+
+    const prompt = `You are a "Second Brain" AI assistant with access to the user's saved links.
+
+User Query: "${query}"
+${entityContext}
+
+Your goal: Answer the query using ONLY the provided context.
+- Reference specific saves by [number] and title.
+- Synthesize information across multiple saves.
+- Be concise and actionable.
+- Mention if a save was found via graph traversal (entity connections).
+- If no relevant saves, say so honestly.
+
+Saved content:
+${contextText}
+
+Answer:`
+
+    const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,
+        {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                contents: [{ role: 'user', parts: [{ text: prompt }] }],
+                generationConfig: { temperature: 0.7, maxOutputTokens: 1024 },
+            }),
+        }
+    )
+    if (!res.ok) throw new Error(`Gemini answer error: ${res.statusText}`)
+    const data = await res.json()
+    return data.candidates?.[0]?.content?.parts?.[0]?.text || 'No response generated.'
+}
+
+// ── Handler ──────────────────────────────────────────────────────────────────
+serve(async (req) => {
+    if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
+
+    try {
+        const body = await req.json()
+        const { query, user_phone } = body
+        if (!query) throw new Error('query required')
 
         // Rate limit
         const clientIP = req.headers.get('x-forwarded-for') || 'anonymous'
         const allowed = await checkRateLimit(clientIP)
         if (!allowed) {
-            return new Response(JSON.stringify({ error: 'Rate limit exceeded. Max 10 queries per hour.' }), {
-                status: 429,
-                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            return new Response(JSON.stringify({ error: 'Rate limit exceeded. Max 10 queries/hour.' }), {
+                status: 429, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
             })
         }
 
-        // 1. Generate Embedding for Query using Gemini
-        const queryEmbedding = await generateEmbedding(query)
+        // 1. Extract query entities + intent (in parallel with embedding)
+        const [extractResult, queryEmbedding] = await Promise.all([
+            extractQueryEntities(query),
+            generateEmbedding(query),
+        ])
 
-        // 2. Search Supabase (Vector Search)
-        const { data: contextSaves, error: searchError } = await supabase.rpc('match_saves', {
+        const { entities: queryEntities, intent, require_all, filters } = extractResult
+
+        // 2. Vector search (existing, unchanged)
+        const { data: vectorSaves, error: vecErr } = await supabase.rpc('match_saves', {
             query_embedding: queryEmbedding,
-            match_threshold: 0.5,
+            match_threshold: 0.45,
             match_count: 8,
         })
+        if (vecErr) console.error('[chat-brain] vector search error:', vecErr)
 
-        if (searchError) {
-            console.error('Vector search error:', searchError)
-            // Fallback: do a simple text search if vector search fails
-        }
+        const vectorResults = (vectorSaves || []).map((s: any) => ({
+            ...s, retrieval_source: 'vector',
+        }))
 
-        // 3. Generate Answer using Gemini
-        const contextText = contextSaves?.length
-            ? contextSaves.map((s: any) => `- [${s.category}] ${s.title}: ${s.summary} (Similarity: ${(s.similarity * 100).toFixed(0)}%)`).join('\n')
-            : 'No relevant saves found via vector search.'
+        // 3. Graph retrieval (if Neo4j configured + phone provided)
+        const phone = user_phone || clientIP
+        const { saves: graphSaves, entityKeys, matchedEntityNames } =
+            await graphRetrieval(phone, queryEntities, require_all, 8)
 
-        const prompt = `You are a "Second Brain" AI assistant.
-User Query: "${query}"
+        // 4. Merge + deduplicate
+        const merged: any[] = []
+        const seenIds = new Set<string>()
 
-Your goal is to Answer the query using ONLY the provided context (Vector Search Results).
-- Reference specific saves by title.
-- Synthesize information across multiple saves.
-- Be concise and actionable.
-- If no relevant saves found, say so honestly.
-
-Context:
-${contextText}
-
-Answer the user's query based on the context above.`
-
-        const response = await fetch(
-            `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`,
-            {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    contents: [
-                        {
-                            role: 'user',
-                            parts: [{ text: prompt }]
-                        }
-                    ],
-                    generationConfig: {
-                        temperature: 0.7,
-                        maxOutputTokens: 1024,
-                    },
-                }),
+        for (const s of graphSaves) {
+            if (!seenIds.has(s.id)) {
+                seenIds.add(s.id)
+                merged.push(s)
             }
-        )
-
-        if (!response.ok) {
-            const errorText = await response.text()
-            throw new Error(`Gemini API Error: ${response.statusText} ${errorText}`)
+        }
+        for (const s of vectorResults) {
+            if (!seenIds.has(s.id)) {
+                seenIds.add(s.id)
+                merged.push({ ...s, retrieval_source: 'vector' })
+            } else {
+                // Mark as found by both
+                const existing = merged.find(m => m.id === s.id)
+                if (existing) existing.retrieval_source = 'both'
+            }
         }
 
-        const data = await response.json()
-        const reply = data.candidates?.[0]?.content?.parts?.[0]?.text
+        // Sort: both > graph > vector, then by score
+        merged.sort((a, b) => {
+            const order = { both: 0, graph: 1, vector: 2 }
+            const oa = order[a.retrieval_source] ?? 2
+            const ob = order[b.retrieval_source] ?? 2
+            if (oa !== ob) return oa - ob
+            return (b.similarity || b.graph_score || 0) - (a.similarity || a.graph_score || 0)
+        })
 
-        if (!reply) throw new Error('No response from Gemini')
+        const finalSaves = merged.slice(0, 10)
 
-        return new Response(JSON.stringify({ reply, references: contextSaves || [] }), {
+        // 5. Generate answer
+        const reply = await generateAnswer(query, finalSaves, matchedEntityNames)
+
+        // 6. Build citations
+        const citations = finalSaves.map(s => ({
+            save_id: s.id,
+            title: s.title || s.summary?.slice(0, 60) || 'Untitled',
+            url: s.url || '',
+            source: s.retrieval_source || 'vector',
+            matched_entities: s.matched_entities || [],
+            similarity: s.similarity ? Math.round(s.similarity * 100) / 100 : null,
+        }))
+
+        return new Response(JSON.stringify({
+            reply,
+            citations,
+            // Legacy field for backward compat
+            references: vectorResults,
+            // Full retrieval telemetry
+            retrieval: {
+                entities_extracted: queryEntities.map(e => e.name),
+                graph_entities_matched: matchedEntityNames,
+                graph_save_ids: graphSaves.map(s => s.id),
+                vector_save_ids: vectorResults.map(s => s.id),
+                merged_ids: finalSaves.map(s => s.id),
+                hops: 2,
+                intent,
+                require_all,
+                neo4j_active: isNeo4jConfigured(),
+            },
+        }), {
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         })
 
     } catch (error) {
+        console.error('[chat-brain] error:', error)
         return new Response(JSON.stringify({ error: error.message }), {
-            status: 500,
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         })
     }
 })

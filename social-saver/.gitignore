@@ -3,11 +3,16 @@ node_modules/
 
 # Build output
 dist/
+build/
+.output/
 
-# Environment variables
+# Environment variables & secrets — NEVER commit these
 .env
 .env.local
 .env.*.local
+supabase/.env
+supabase/functions/.env
+*.env.backend
 
 # IDE
 .vscode/
@@ -18,6 +23,8 @@ dist/
 
 # OS
 .DS_Store
+.DS_Store?
+._*
 Thumbs.db
 
 # Logs
@@ -26,10 +33,15 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
-# Supabase
+# Supabase local dev artifacts
 supabase/.branches
 supabase/.temp
+.supabase/
+
+# TypeScript
+*.tsbuildinfo
 
 # Misc
 *.tgz
 .cache/
+coverage/

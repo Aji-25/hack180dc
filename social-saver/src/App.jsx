@@ -270,7 +270,7 @@ function App() {
                 <div className="mx-auto max-w-6xl px-6">
                     {/* Ask My Saves - Hero Section */}
                     <div className="mb-12">
-                        <AskSaves saves={useMock ? MOCK_SAVES : saves} onFilterResults={setAskResults} />
+                        <AskSaves saves={useMock ? MOCK_SAVES : saves} userPhone={userPhone} onFilterResults={setAskResults} />
                     </div>
 
                     {/* Section Header */}
@@ -351,7 +351,7 @@ function App() {
                     ) : displaySaves.length > 0 ? (
                         <>
                             {viewMode === 'graph' ? (
-                                <KnowledgeGraph saves={displaySaves} />
+                                <KnowledgeGraph saves={displaySaves} userPhone={userPhone} />
                             ) : viewMode === 'collections' ? (
                                 <CollectionsView saves={displaySaves} onDelete={handleDelete} onUpdate={handleUpdate} />
                             ) : (

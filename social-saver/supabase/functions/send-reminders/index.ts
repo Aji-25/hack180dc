@@ -57,9 +57,17 @@ serve(async (req) => {
             })
 
             if (!twilioRes.ok) {
-                const err = await twilioRes.text()
-                console.error('Twilio Error:', err)
-                throw new Error('Twilio send failed')
+                const errText = await twilioRes.text()
+                console.error('Twilio Error:', errText)
+
+                // Return a specific error response instead of throwing 500
+                return new Response(JSON.stringify({
+                    success: false,
+                    error: `Twilio send failed. Check Twilio logs. Detail: ${errText.slice(0, 100)}...`
+                }), {
+                    status: 400,
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                })
             }
         } else {
             console.log('Skipping Twilio (no creds). Would send:', randomSave.title)

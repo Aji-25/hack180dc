@@ -45,6 +45,48 @@ async function checkRateLimit(identifier: string): Promise<boolean> {
     return true
 }
 
+// Gemini call with exponential backoff for 429 errors
+async function callGemini(prompt: string): Promise<string> {
+    let lastError: any
+    for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+            const res = await fetch(
+                `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,
+                {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+                        generationConfig: { temperature: 0.7, maxOutputTokens: 4096 },
+                    }),
+                }
+            )
+
+            if (!res.ok) {
+                const errorText = await res.text()
+                console.error(`Gemini error (attempt ${attempt}):`, res.status, errorText)
+                if (res.status === 429) {
+                    await new Promise(r => setTimeout(r, attempt * 2000))
+                    lastError = new Error(`Gemini 429 quota exceeded`)
+                    continue
+                }
+                throw new Error(`Gemini API error: ${res.status}`)
+            }
+
+            const data = await res.json()
+            return data.candidates?.[0]?.content?.parts?.[0]?.text || ''
+        } catch (err) {
+            lastError = err
+            if (err.message?.includes('429')) {
+                await new Promise(r => setTimeout(r, attempt * 2000))
+                continue
+            }
+            throw err
+        }
+    }
+    throw lastError
+}
+
 serve(async (req) => {
     if (req.method === 'OPTIONS') {
         return new Response('ok', { headers: corsHeaders })
@@ -55,7 +97,6 @@ serve(async (req) => {
 
         if (!query) throw new Error('Query required')
 
-        // Rate limit by IP or a simple identifier
         const clientIP = req.headers.get('x-forwarded-for') || 'anonymous'
         const allowed = await checkRateLimit(clientIP)
         if (!allowed) {
@@ -65,18 +106,7 @@ serve(async (req) => {
             })
         }
 
-        // Call Gemini API
-        const response = await fetch(
-            `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`,
-            {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    contents: [
-                        {
-                            role: 'user',
-                            parts: [{
-                                text: `You are a "Deep Research Agent". Your goal is to turn a simple bookmark into a comprehensive knowledge dossier.
+        const prompt = `You are a "Deep Research Agent". Your goal is to turn a simple bookmark into a comprehensive knowledge dossier.
 
 Given a topic/title, provide a structured Markdown report with:
 1. 🔍 **The Deep Dive**: Academic or technical context often missed.
@@ -84,28 +114,11 @@ Given a topic/title, provide a structured Markdown report with:
 3. 🗣️ **The Internet's Take**: Simulate the likely sentiment on Reddit/Hacker News/Twitter.
 4. 📚 **Further Reading**: 3 search terms to learn more.
 
-Be concise but insightful. formatting: standard markdown.
+Be concise but insightful. Use standard markdown formatting.
 
 Analyze this saved item: "${query}"`
-                            }]
-                        }
-                    ],
-                    generationConfig: {
-                        temperature: 0.7,
-                        maxOutputTokens: 4096,
-                    },
-                }),
-            }
-        )
 
-        if (!response.ok) {
-            const errorText = await response.text()
-            console.error('Gemini API Error:', errorText)
-            throw new Error(`Gemini API Error: ${response.statusText}`)
-        }
-
-        const data = await response.json()
-        const dossier = data.candidates?.[0]?.content?.parts?.[0]?.text
+        const dossier = await callGemini(prompt)
 
         if (!dossier) throw new Error('No response from Gemini')
 
@@ -114,6 +127,23 @@ Analyze this saved item: "${query}"`
         })
 
     } catch (error) {
+        console.error('[deep-research] error:', error.message)
+        // Return friendly response for quota errors so the UI doesn't show a blank 500
+        if (error.message?.includes('429')) {
+            const fallback = `## ⏳ AI Research Temporarily Unavailable
+
+The Gemini API is currently rate-limited. Here are some quick resources you can use instead:
+
+**🔍 Search for this topic on:**
+- [Google Scholar](https://scholar.google.com/scholar?q=${encodeURIComponent(query || '')})
+- [Hacker News](https://hn.algolia.com/?q=${encodeURIComponent(query || '')})
+- [Reddit](https://www.reddit.com/search/?q=${encodeURIComponent(query || '')})
+
+*The AI deep-dive will be available again in ~1 minute once the API rate limit resets.*`
+            return new Response(JSON.stringify({ dossier: fallback }), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            })
+        }
         return new Response(JSON.stringify({ error: error.message }), {
             status: 500,
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },

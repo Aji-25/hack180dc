@@ -76,52 +76,61 @@ serve(async (req: Request) => {
 
         try {
             const metaRes = await fetch(save.url, {
-                headers: { "User-Agent": "Mozilla/5.0 (compatible; SocialSaverBot/1.0)" },
+                headers: {
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                    "Accept-Language": "en-US,en;q=0.5",
+                },
                 signal: AbortSignal.timeout(5000),
             });
             const html = await metaRes.text();
 
-            const titleMatch = html.match(/<meta\s+property="og:title"\s+content="([^"]+)"/i) ||
-                html.match(/<title>([^<]+)<\/title>/i);
-            const descMatch = html.match(/<meta\s+property="og:description"\s+content="([^"]+)"/i) ||
-                html.match(/<meta\s+name="description"\s+content="([^"]+)"/i);
+            // Attribute-order-agnostic OG tag matching
+            const ogTitle = html.match(/<meta[^>]*property=["']og:title["'][^>]*content=["']([^"']+)["']/i)?.[1]
+                || html.match(/<meta[^>]*content=["']([^"']+)["'][^>]*property=["']og:title["']/i)?.[1]
+                || html.match(/<title[^>]*>([^<]+)<\/title>/i)?.[1]
+                || "";
+            const ogDesc = html.match(/<meta[^>]*property=["']og:description["'][^>]*content=["']([^"']+)["']/i)?.[1]
+                || html.match(/<meta[^>]*content=["']([^"']+)["'][^>]*property=["']og:description["']/i)?.[1]
+                || html.match(/<meta[^>]*name=["']description["'][^>]*content=["']([^"']+)["']/i)?.[1]
+                || "";
 
-            if (titleMatch) title = titleMatch[1];
-            if (descMatch) rawText = descMatch[1];
+            if (ogTitle) title = ogTitle;
+            if (ogDesc) rawText = ogDesc;
         } catch {
             // Keep existing data
         }
 
-        // Call Gemini for classification
+        // Call Gemini for classification with retry on 429
         const textForLLM = [title, rawText, save.note].filter(Boolean).join(" | ");
-
-        const llmRes = await fetch(
-            `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`,
-            {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    contents: [
-                        {
+        let llmData: any = null;
+        for (let attempt = 1; attempt <= 3; attempt++) {
+            const llmRes = await fetch(
+                `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,
+                {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        contents: [{
                             role: "user",
                             parts: [{
-                                text: `Classify this saved link into exactly one category: Fitness, Coding, Food, Travel, Design, Business, Self-Improvement, Other. Return ONLY valid JSON (no markdown, no backticks): { "category": "...", "tags": ["...", ...], "summary": "..." }. Summary should be ≤20 words, actionable: what it is + why it matters. Tags: 3-6 lowercase.
-
-URL: ${save.url}
-Source: ${save.source}
-Content: ${textForLLM.slice(0, 500)}`
+                                text: `Classify this saved link into exactly one category: Fitness, Coding, Food, Travel, Design, Business, Self-Improvement, Other. Return ONLY valid JSON (no markdown, no backticks): { "category": "...", "tags": ["...", ...], "summary": "..." }. Summary should be ≤20 words, actionable: what it is + why it matters. Tags: 3-6 lowercase.\n\nURL: ${save.url}\nSource: ${save.source}\nContent: ${textForLLM.slice(0, 500)}`
                             }]
-                        }
-                    ],
-                    generationConfig: {
-                        temperature: 0.3,
-                        maxOutputTokens: 200,
-                    },
-                }),
+                        }],
+                        generationConfig: { temperature: 0.3, maxOutputTokens: 200 },
+                    }),
+                }
+            );
+            if (!llmRes.ok) {
+                if (llmRes.status === 429) {
+                    await new Promise(r => setTimeout(r, attempt * 1500));
+                    continue;
+                }
+                break; // Non-retryable error
             }
-        );
-
-        const llmData = await llmRes.json();
+            llmData = await llmRes.json();
+            break;
+        }
         let category = save.category || "Other";
         let tags = save.tags || [];
         let summary = save.summary || "";

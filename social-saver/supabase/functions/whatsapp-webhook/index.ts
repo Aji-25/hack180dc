@@ -15,6 +15,8 @@ const APP_URL = Deno.env.get("APP_URL") || "https://social-saver.vercel.app";
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
+console.log(`[webhook] GEMINI_API_KEY present: ${!!GEMINI_API_KEY}, length: ${GEMINI_API_KEY?.length || 0}`);
+
 const CATEGORIES = [
     "Fitness", "Coding", "Food", "Travel",
     "Design", "Business", "Self-Improvement", "Other",
@@ -24,6 +26,28 @@ const CATEGORY_EMOJIS: Record<string, string> = {
     Fitness: "💪", Coding: "💻", Food: "🍳", Travel: "✈️",
     Design: "🎨", Business: "💼", "Self-Improvement": "🧠", Other: "📌",
 };
+
+// ── Per-phone Gemini Rate Limiter ─────────────────────────
+// Limits each phone number to MAX_CALLS_PER_WINDOW Gemini calls
+// within WINDOW_MS milliseconds to protect API quota.
+
+const WINDOW_MS = 60_000;       // 1 minute window
+const MAX_CALLS_PER_WINDOW = 10; // max Gemini calls per phone per minute
+
+const geminiCallLog = new Map<string, number[]>(); // phone → timestamps[]
+
+function isGeminiRateLimited(phone: string): boolean {
+    const now = Date.now();
+    const window_start = now - WINDOW_MS;
+    const calls = (geminiCallLog.get(phone) || []).filter(t => t > window_start);
+    if (calls.length >= MAX_CALLS_PER_WINDOW) {
+        console.warn(`[rate-limit] ${phone} hit Gemini quota (${calls.length} calls in last 60s)`);
+        return true;
+    }
+    calls.push(now);
+    geminiCallLog.set(phone, calls);
+    return false;
+}
 
 // ── Helpers ──────────────────────────────────────────────
 
@@ -44,26 +68,37 @@ function detectSource(url: string): string {
 async function fetchMetadata(url: string): Promise<{ title: string; description: string }> {
     try {
         const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 3000);
+        const timeout = setTimeout(() => controller.abort(), 5000);
 
         const res = await fetch(url, {
             signal: controller.signal,
-            headers: { "User-Agent": "Mozilla/5.0 (compatible; SocialSaverBot/1.0)" },
+            headers: {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "Accept-Language": "en-US,en;q=0.5",
+            },
             redirect: "follow",
         });
         clearTimeout(timeout);
 
         const html = await res.text();
 
-        const ogTitle = html.match(/<meta[^>]*property=["']og:title["'][^>]*content=["']([^"']+)["']/i)?.[1] || "";
-        const ogDesc = html.match(/<meta[^>]*property=["']og:description["'][^>]*content=["']([^"']+)["']/i)?.[1] || "";
+        // Try multiple patterns for OG tags (attribute order varies)
+        const ogTitle = html.match(/<meta[^>]*property=["']og:title["'][^>]*content=["']([^"']+)["']/i)?.[1]
+            || html.match(/<meta[^>]*content=["']([^"']+)["'][^>]*property=["']og:title["']/i)?.[1]
+            || "";
+        const ogDesc = html.match(/<meta[^>]*property=["']og:description["'][^>]*content=["']([^"']+)["']/i)?.[1]
+            || html.match(/<meta[^>]*content=["']([^"']+)["'][^>]*property=["']og:description["']/i)?.[1]
+            || "";
         const titleTag = html.match(/<title[^>]*>([^<]+)<\/title>/i)?.[1] || "";
+        const metaDesc = html.match(/<meta[^>]*name=["']description["'][^>]*content=["']([^"']+)["']/i)?.[1] || "";
 
         return {
             title: ogTitle || titleTag || "",
-            description: ogDesc || "",
+            description: ogDesc || metaDesc || "",
         };
-    } catch {
+    } catch (e) {
+        console.error('fetchMetadata failed:', e);
         return { title: "", description: "" };
     }
 }
@@ -142,22 +177,42 @@ async function callGemini(prompt: string, options: { temperature?: number; maxTo
         body.generationConfig.responseMimeType = 'application/json';
     }
 
-    const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`,
-        {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(body),
+    let lastError: any;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+            const res = await fetch(
+                `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,
+                {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body),
+                }
+            );
+
+            if (!res.ok) {
+                const text = await res.text();
+                console.error(`Gemini error (Attempt ${attempt}):`, res.status, text);
+                if (res.status === 429) {
+                    // Quota exhausted, wait and retry
+                    await new Promise(r => setTimeout(r, attempt * 1500));
+                    lastError = new Error(`Gemini API 429: ${text}`);
+                    continue;
+                }
+                throw new Error(`Gemini API error: ${res.status}`);
+            }
+
+            const data = await res.json();
+            return data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+        } catch (error) {
+            lastError = error;
+            if (error.message.includes('429')) {
+                await new Promise(r => setTimeout(r, attempt * 1500));
+                continue;
+            }
+            throw error;
         }
-    );
-
-    if (!res.ok) {
-        console.error("Gemini error:", res.status, await res.text());
-        throw new Error(`Gemini API error: ${res.status}`);
     }
-
-    const data = await res.json();
-    return data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+    throw lastError;
 }
 
 async function generateEmbedding(text: string): Promise<number[] | null> {
@@ -189,6 +244,80 @@ async function generateEmbedding(text: string): Promise<number[] | null> {
     }
 }
 
+// ── Smart URL-based fallback (no LLM needed) ───────────
+
+function classifyFromURL(
+    url: string,
+    source: string,
+    title: string,
+    description: string,
+    userNote: string,
+): { category: string; tags: string[]; summary: string; action_steps: string[] } {
+    const lower = (url + " " + (title || "") + " " + (description || "") + " " + (userNote || "")).toLowerCase();
+    const isReel = url.includes("/reel/") || url.includes("/reels/");
+    const isPost = url.includes("/p/");
+    const isStory = url.includes("/stories/");
+
+    // Extract username from Instagram URL
+    let username = "";
+    const igMatch = url.match(/instagram\.com\/([^/?]+)/);
+    if (igMatch && !["reel", "reels", "p", "stories", "explore"].includes(igMatch[1])) {
+        username = igMatch[1];
+    }
+
+    // Detect content type
+    const contentType = isReel ? "Reel" : isStory ? "Story" : isPost ? "Post" : "Link";
+
+    // Smart category detection from available text
+    const categoryKeywords: Record<string, string[]> = {
+        "Fitness": ["workout", "exercise", "gym", "fitness", "yoga", "hiit", "abs", "muscle", "cardio", "strength", "run", "plank", "squat", "deadlift", "protein", "bulk", "cut", "reps", "sets"],
+        "Food": ["recipe", "cook", "food", "meal", "eat", "restaurant", "dish", "kitchen", "bake", "ingredient", "dinner", "lunch", "breakfast", "snack", "healthy eating"],
+        "Coding": ["code", "programming", "developer", "javascript", "python", "react", "api", "github", "software", "tech", "ai", "machine learning", "web dev", "tutorial", "framework"],
+        "Travel": ["travel", "trip", "flight", "hotel", "beach", "mountain", "destination", "explore", "vacation", "tour", "backpack", "bali", "europe", "japan"],
+        "Design": ["design", "ui", "ux", "figma", "typography", "logo", "graphic", "creative", "aesthetic", "layout", "portfolio"],
+        "Business": ["startup", "business", "entrepreneur", "invest", "money", "finance", "marketing", "sales", "growth", "revenue", "founder", "ceo"],
+        "Self-Improvement": ["productivity", "mindset", "habit", "morning routine", "meditation", "journal", "self-help", "motivation", "focus", "discipline", "reading", "book"],
+    };
+
+    let detectedCategory = "Other";
+    let matchedTags: string[] = [];
+
+    for (const [cat, keywords] of Object.entries(categoryKeywords)) {
+        const matched = keywords.filter(kw => lower.includes(kw));
+        if (matched.length > matchedTags.length) {
+            detectedCategory = cat;
+            matchedTags = matched;
+        }
+    }
+
+    // Build tags — include note keywords too
+    const noteTags = userNote
+        ? userNote.toLowerCase().split(/\s+/).filter(w => w.length > 3 && !['this', 'that', 'from', 'with', 'just', 'also', 'here', 'want', 'save'].includes(w)).slice(0, 3)
+        : [];
+    const tags = [...new Set([
+        source,
+        contentType.toLowerCase(),
+        ...(username ? [username] : []),
+        ...matchedTags.slice(0, 3),
+        ...noteTags,
+    ])].slice(0, 6);
+
+    // Build a useful title — prefer username-based title
+    const displayTitle = title
+        || (username ? `${username}'s ${contentType}` : `${source.charAt(0).toUpperCase() + source.slice(1)} ${contentType}`)
+        || `Saved ${source} link`;
+
+    // Build summary — use note as PRIMARY source, it's the most useful context we have
+    const cleanNote = userNote?.replace(/^[\s\-–—:]+/, '').trim(); // strip leading "- " or ": "
+    const summary = cleanNote
+        ? `${cleanNote} — ${contentType.toLowerCase()} saved from ${source}.`
+        : description
+        || (title ? `${title} — saved from ${source}.`
+            : `${displayTitle} — add a note for better categorization.`);
+
+    return { category: detectedCategory, tags, summary, action_steps: [] };
+}
+
 // ── Classification ──────────────────────────────────────
 
 async function classifyWithLLM(
@@ -197,12 +326,21 @@ async function classifyWithLLM(
     title: string,
     description: string,
     userNote: string,
+    phone: string = 'unknown',
 ): Promise<{ category: string; tags: string[]; summary: string; action_steps: string[] }> {
-    const fallback = { category: "Other", tags: [], summary: `Saved ${source} link`, action_steps: [] };
+    // Always have a smart fallback ready (no LLM needed)
+    const smartFallback = classifyFromURL(url, source, title, description, userNote);
 
+    // Check per-phone rate limit before calling Gemini
+    if (isGeminiRateLimited(phone)) {
+        console.log(`[classify] Rate limited for ${phone}, using smart fallback`);
+        return smartFallback;
+    }
     try {
         const isReel = url.includes("/reel/") || url.includes("/reels/");
         const isPost = url.includes("/p/");
+
+        console.log(`[classify] URL: ${url} | Source: ${source} | Title: "${title}" | Desc: "${description?.slice(0, 50)}" | Note: "${userNote?.slice(0, 50)}"`);
 
         const prompt = `You are a content categorizer for saved social media links. Output a JSON object with exactly these fields:
 - "category": exactly one of [${CATEGORIES.join(", ")}]
@@ -224,9 +362,14 @@ Description: ${description || "(none)"}
 User note: ${userNote || "(none)"}`;
 
         const content = await callGemini(prompt, { temperature: 0.3, maxTokens: 250, jsonMode: true });
-        if (!content) return fallback;
+        console.log(`[classify] Gemini raw response: "${content?.slice(0, 200)}"`);
+        if (!content) {
+            console.log("[classify] Empty Gemini response, using smart fallback");
+            return smartFallback;
+        }
 
         const parsed = JSON.parse(content);
+        console.log(`[classify] Parsed result: category=${parsed.category}, summary=${parsed.summary?.slice(0, 50)}`);
 
         const category = CATEGORIES.includes(parsed.category) ? parsed.category : "Other";
         const tags = Array.isArray(parsed.tags)
@@ -234,55 +377,26 @@ User note: ${userNote || "(none)"}`;
             : [];
         const summary = typeof parsed.summary === "string" && parsed.summary.trim()
             ? parsed.summary.trim()
-            : `Saved ${source} link`;
+            : smartFallback.summary;
         const action_steps = Array.isArray(parsed.action_steps)
             ? parsed.action_steps.filter((s: unknown) => typeof s === "string").slice(0, 4)
             : [];
 
         return { category, tags, summary, action_steps };
     } catch (err) {
-        console.error("LLM error:", err);
-        return fallback;
+        console.error("[classify] LLM error, using smart fallback:", err.message);
+        return smartFallback;
     }
 }
 
-// ── Voice → Transcription (graceful fallback) ───────────
+// ── Voice → Not supported (Gemini REST API doesn't support audio transcription) ──
 
-async function transcribeAudio(mediaUrl: string): Promise<string> {
-    // Gemini doesn't have a direct Whisper equivalent via simple REST
-    // Try OpenAI Whisper if key is available, otherwise return empty
-    const openaiKey = Deno.env.get('OPENAI_API_KEY');
-    if (!openaiKey) {
-        console.log("No OPENAI_API_KEY set — voice transcription unavailable");
-        return "";
-    }
-
-    try {
-        const audioRes = await fetch(mediaUrl);
-        const audioBlob = await audioRes.blob();
-
-        const form = new FormData();
-        form.append("file", audioBlob, "voice.ogg");
-        form.append("model", "whisper-1");
-        form.append("language", "en");
-
-        const whisperRes = await fetch("https://api.openai.com/v1/audio/transcriptions", {
-            method: "POST",
-            headers: { Authorization: `Bearer ${openaiKey}` },
-            body: form,
-        });
-
-        if (!whisperRes.ok) {
-            console.error("Whisper error:", whisperRes.status);
-            return "";
-        }
-
-        const result = await whisperRes.json();
-        return result.text || "";
-    } catch (err) {
-        console.error("Transcription error:", err);
-        return "";
-    }
+async function transcribeAudio(_mediaUrl: string): Promise<string> {
+    // Voice transcription is unavailable — Gemini's REST API does not expose
+    // a simple audio-to-text endpoint like Whisper. Return empty to trigger
+    // the "voice notes unavailable" message in the webhook handler.
+    console.log("Voice transcription unavailable — no supported transcription service.");
+    return "";
 }
 
 // ── Image → Gemini Vision description ──────────────────
@@ -296,7 +410,7 @@ async function describeImage(mediaUrl: string): Promise<{ title: string; descrip
         const mimeType = imageRes.headers.get('content-type') || 'image/jpeg';
 
         const res = await fetch(
-            `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`,
+            `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,
             {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -401,7 +515,7 @@ Deno.serve(async (req) => {
                 return twimlResponse("🎙️ Voice notes are currently unavailable. Please send a text or link instead!");
             }
 
-            const classification = await classifyWithLLM("", "voice", "Voice Note", transcript, body);
+            const classification = await classifyWithLLM("", "voice", "Voice Note", transcript, body, from);
 
             await supabase.from("saves").insert({
                 user_phone: from,
@@ -432,7 +546,7 @@ Deno.serve(async (req) => {
             const imageInfo = await describeImage(mediaUrl);
 
             const classification = await classifyWithLLM(
-                mediaUrl, "image", imageInfo.title, imageInfo.description, body
+                mediaUrl, "image", imageInfo.title, imageInfo.description, body, from
             );
 
             await supabase.from("saves").insert({
@@ -484,7 +598,7 @@ Deno.serve(async (req) => {
                     return twimlResponse("Got it! Saved without a note. ✅");
                 }
 
-                const result = await classifyWithLLM(row.url, row.source, row.title || "", row.raw_text || "", noteText);
+                const result = await classifyWithLLM(row.url, row.source, row.title || "", row.raw_text || "", noteText, from);
 
                 await supabase
                     .from("saves")
@@ -523,7 +637,7 @@ Deno.serve(async (req) => {
                 const content = await fetchContent(url);
 
                 const classification = await classifyWithLLM(
-                    url, source, metadata.title, metadata.description, (content || "").slice(0, 1000)
+                    url, source, metadata.title, metadata.description, (content || "").slice(0, 1000), from
                 );
 
                 const status = hasMetadata ? "complete" : "pending_note";
@@ -556,12 +670,20 @@ Deno.serve(async (req) => {
                     continue;
                 }
 
-                // Generate Embedding with Gemini
                 if (data?.id) {
                     const embedding = await generateEmbedding(embedContent.slice(0, 2000));
                     if (embedding) {
                         await supabase.from('saves').update({ embedding }).eq('id', data.id);
                     }
+
+                    // Queue this save for Neo4j graph indexing (async — does not block reply)
+                    supabase.from('graph_jobs').insert({
+                        save_id: data.id,
+                        user_phone: from,
+                        status: 'pending',
+                    }).then(({ error: jobErr }) => {
+                        if (jobErr) console.warn('[webhook] graph_jobs insert failed:', jobErr.message)
+                    })
                 }
 
                 const emoji = CATEGORY_EMOJIS[classification.category] || "📌";

@@ -76,46 +76,37 @@ serve(async (req: Request) => {
             .slice(0, 15)
             .join("; ");
 
-        // One LLM call
-        const llmRes = await fetch("https://api.openai.com/v1/chat/completions", {
-            method: "POST",
-            headers: {
-                Authorization: `Bearer ${Deno.env.get("OPENAI_API_KEY")}`,
-                "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-                model: "gpt-4o-mini",
-                temperature: 0.7,
-                max_tokens: 300,
-                response_format: { type: "json_object" },
-                messages: [
-                    {
-                        role: "system",
-                        content: `You generate weekly recap summaries for a link-saving app. Be conversational, warm, and specific. Return JSON: { "bullets": ["...", "...", "...", "...", "..."] } — exactly 5 bullets.`,
-                    },
-                    {
-                        role: "user",
-                        content: `User saved ${saves.length} links this week.
-Categories: ${catSummary}.
-Top tags: ${topTags.join(", ")}.
-Sample summaries: ${summaries}.
-
-Generate a 5-bullet weekly recap:
-1) A summary line like "You saved X links: Y Fitness, Z Food…"
-2) Top themes you noticed across the saves
-3) An interesting pattern or insight
-4) A suggestion for what to explore next
-5) A motivational or fun closing line`,
-                    },
-                ],
-            }),
-        });
+        // One LLM call using Gemini
+        const llmRes = await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${Deno.env.get("GEMINI_API_KEY")}`,
+            {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    contents: [
+                        {
+                            role: "user",
+                            parts: [
+                                {
+                                    text: `You generate weekly recap summaries for a link-saving app. Be conversational, warm, and specific. Return JSON: { "bullets": ["...", "...", "...", "...", "..."] } — exactly 5 bullets.\n\nUser saved ${saves.length} links this week.\nCategories: ${catSummary}.\nTop tags: ${topTags.join(", ")}.\nSample summaries: ${summaries}.\n\nGenerate a 5-bullet weekly recap:\n1) A summary line like "You saved X links: Y Fitness, Z Food…"\n2) Top themes you noticed across the saves\n3) An interesting pattern or insight\n4) A suggestion for what to explore next\n5) A motivational or fun closing line`
+                                }
+                            ]
+                        }
+                    ],
+                    generationConfig: {
+                        temperature: 0.7,
+                        responseMimeType: "application/json"
+                    }
+                })
+            }
+        );
 
         const llmData = await llmRes.json();
         let bullets: string[] = [];
 
         try {
-            const parsed = JSON.parse(llmData.choices[0].message.content);
+            const text = llmData.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
+            const parsed = JSON.parse(text);
             bullets = parsed.bullets || [];
         } catch {
             bullets = [
