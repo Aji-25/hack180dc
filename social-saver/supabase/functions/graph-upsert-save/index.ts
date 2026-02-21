@@ -10,7 +10,7 @@ import {
 } from '../_shared/neo4j.ts'
 import { checkDemoKey } from '../_shared/auth.ts'
 
-const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY')!
+const OPENAI_API_KEY = Deno.env.get('OPENAI_API_KEY')!
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const SUPABASE_SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY)
@@ -65,25 +65,21 @@ Return ONLY valid JSON matching this schema exactly:
 
 async function extractEntities(save: any): Promise<{ entities: any[]; relations: any[] }> {
     const prompt = EXTRACT_PROMPT(save)
-    const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,
-        {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                contents: [{ role: 'user', parts: [{ text: prompt }] }],
-                generationConfig: {
-                    temperature: 0.1,
-                    maxOutputTokens: 1024,
-                    responseMimeType: 'application/json',
-                },
-            }),
-        }
-    )
+    const res = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${OPENAI_API_KEY}` },
+        body: JSON.stringify({
+            model: 'gpt-4o-mini',
+            messages: [{ role: 'user', content: prompt }],
+            temperature: 0.1,
+            max_tokens: 1024,
+            response_format: { type: 'json_object' },
+        }),
+    })
 
-    if (!res.ok) throw new Error(`Gemini extraction error: ${res.statusText}`)
+    if (!res.ok) throw new Error(`OpenAI extraction error: ${res.statusText}`)
     const data = await res.json()
-    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '{}'
+    const text = data.choices?.[0]?.message?.content || '{}'
 
     try {
         const parsed = JSON.parse(text)

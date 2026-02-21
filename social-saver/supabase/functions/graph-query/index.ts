@@ -4,6 +4,7 @@
 // e.freq is recomputed via COUNT (not stored) to avoid inflation from retries.
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
+import neo4j from 'npm:neo4j-driver@5'
 import { runCypher, isNeo4jConfigured } from '../_shared/neo4j.ts'
 
 const corsHeaders = {
@@ -49,7 +50,7 @@ serve(async (req) => {
             ORDER BY freq DESC
             LIMIT $limit
             RETURN e.key AS id, e.name AS label, e.type AS type, freq AS size
-        `, { phone: user_phone, limit: limitNodes })
+        `, { phone: user_phone, limit: neo4j.int(limitNodes) })
 
         if (entityRows.length === 0) {
             return new Response(JSON.stringify({ nodes: [], edges: [], message: 'No entities found for this user' }), {
@@ -108,7 +109,7 @@ serve(async (req) => {
         })
 
     } catch (err) {
-        console.error('[graph-query] error:', err)
+        console.error('[graph-query] fatal error:', err)
         return new Response(JSON.stringify({ error: err.message }), {
             status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         })

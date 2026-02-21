@@ -2,7 +2,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 
-const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY')!
+const OPENAI_API_KEY = Deno.env.get('OPENAI_API_KEY')!
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const SUPABASE_SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 
@@ -15,19 +15,14 @@ const corsHeaders = {
 
 async function generateEmbedding(text: string): Promise<number[] | null> {
     try {
-        const response = await fetch(
-            `https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent?key=${GEMINI_API_KEY}`,
-            {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    model: 'models/gemini-embedding-001',
-                    content: {
-                        parts: [{ text: text.slice(0, 2000) }]
-                    },
-                }),
-            }
-        )
+        const response = await fetch('https://api.openai.com/v1/embeddings', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${OPENAI_API_KEY}`,
+            },
+            body: JSON.stringify({ model: 'text-embedding-3-small', input: text.slice(0, 8000) }),
+        })
 
         if (!response.ok) {
             console.error('Embedding error:', await response.text())
@@ -35,7 +30,7 @@ async function generateEmbedding(text: string): Promise<number[] | null> {
         }
 
         const data = await response.json()
-        return data.embedding?.values || null
+        return data.data?.[0]?.embedding || null
     } catch (e) {
         console.error('Embedding failed:', e)
         return null
@@ -104,8 +99,8 @@ serve(async (req) => {
                 failCount++
             }
 
-            // Rate limit: ~40 RPM free tier, 1.5s delay to be safe
-            await delay(1500)
+            // Small delay to respect rate limits
+            await delay(200)
         }
 
         return new Response(JSON.stringify({

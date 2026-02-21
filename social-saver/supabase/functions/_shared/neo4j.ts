@@ -44,9 +44,24 @@ export async function runCypher(
     }
 
     const driver = getDriver()
-    const session = driver.session({ database: 'neo4j' })
+    // AuraDB Free doesn't support explicit database selection — open a session without specifying database
+    const session = driver.session()
     try {
-        const result = await session.run(cypher, params)
+        // Auto-convert integer-like params to neo4j.int() to avoid "20.0 is not valid integer" errors
+        // BUT skip values that are already neo4j integers (neo4j.isInt()) to prevent corruption
+        function convertParam(val: any): any {
+            if (val === null || val === undefined) return val
+            if (neo4j.isInt(val)) return val  // already a neo4j integer, leave alone
+            if (typeof val === 'number' && Number.isInteger(val)) return neo4j.int(val)
+            if (Array.isArray(val)) return val.map(convertParam)
+            if (typeof val === 'object') {
+                const out: any = {}
+                for (const k in val) out[k] = convertParam(val[k])
+                return out
+            }
+            return val
+        }
+        const result = await session.run(cypher, convertParam(params))
         return result.records.map(record => {
             const obj: Record<string, any> = {}
             record.keys.forEach((key: string) => {

@@ -8,8 +8,9 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import {
     runCypher, isNeo4jConfigured, matchEntityKeys, normalizeEntityName, entityKey
 } from '../_shared/neo4j.ts'
+import { checkRateLimit } from '../_shared/rateLimit.ts'
 
-const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY')!
+const OPENAI_API_KEY = Deno.env.get('OPENAI_API_KEY')!
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const SUPABASE_SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY)
@@ -19,44 +20,22 @@ const corsHeaders = {
     'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
-// ── Rate limiting ────────────────────────────────────────────────────────────
-async function checkRateLimit(identifier: string): Promise<boolean> {
-    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString()
-    const { data } = await supabase
-        .from('rate_limits').select('request_count')
-        .eq('identifier', identifier).eq('endpoint', 'chat-brain')
-        .gte('window_start', oneHourAgo).single()
-    if (data && data.request_count >= 10) return false
-    if (data) {
-        await supabase.from('rate_limits')
-            .update({ request_count: data.request_count + 1 })
-            .eq('identifier', identifier).eq('endpoint', 'chat-brain')
-            .gte('window_start', oneHourAgo)
-    } else {
-        await supabase.from('rate_limits').insert({
-            identifier, endpoint: 'chat-brain', request_count: 1,
-            window_start: new Date().toISOString(),
-        })
-    }
-    return true
-}
+// ── Rate limiting: 15 queries per phone per day using shared module ──────────
 
 // ── Gemini helpers ───────────────────────────────────────────────────────────
+// Generate embedding using OpenAI text-embedding-3-small (1536 dims)
 async function generateEmbedding(text: string): Promise<number[]> {
-    const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent?key=${GEMINI_API_KEY}`,
-        {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                model: 'models/gemini-embedding-001',
-                content: { parts: [{ text }] },
-            }),
-        }
-    )
+    const res = await fetch('https://api.openai.com/v1/embeddings', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${OPENAI_API_KEY}`,
+        },
+        body: JSON.stringify({ model: 'text-embedding-3-small', input: text.slice(0, 8000) }),
+    })
     if (!res.ok) throw new Error(`Embedding error: ${res.statusText}`)
     const data = await res.json()
-    return data.embedding.values
+    return data.data[0].embedding
 }
 
 // Query entity + intent extraction
@@ -90,23 +69,20 @@ async function extractQueryEntities(query: string): Promise<{
     filters: { category: string | null; source: string | null };
 }> {
     try {
-        const res = await fetch(
-            `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,
-            {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    contents: [{ role: 'user', parts: [{ text: QUERY_EXTRACT_PROMPT(query) }] }],
-                    generationConfig: {
-                        temperature: 0.1, maxOutputTokens: 512,
-                        responseMimeType: 'application/json',
-                    },
-                }),
-            }
-        )
+        const res = await fetch('https://api.openai.com/v1/chat/completions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${OPENAI_API_KEY}` },
+            body: JSON.stringify({
+                model: 'gpt-4o-mini',
+                messages: [{ role: 'user', content: QUERY_EXTRACT_PROMPT(query) }],
+                temperature: 0.1,
+                max_tokens: 512,
+                response_format: { type: 'json_object' },
+            }),
+        })
         if (!res.ok) throw new Error('extraction failed')
         const data = await res.json()
-        const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '{}'
+        const text = data.choices?.[0]?.message?.content || '{}'
         const parsed = JSON.parse(text)
         return {
             entities: (parsed.query_entities || []).slice(0, 5),
@@ -250,20 +226,19 @@ ${contextText}
 
 Answer:`
 
-    const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,
-        {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                contents: [{ role: 'user', parts: [{ text: prompt }] }],
-                generationConfig: { temperature: 0.7, maxOutputTokens: 1024 },
-            }),
-        }
-    )
-    if (!res.ok) throw new Error(`Gemini answer error: ${res.statusText}`)
+    const res = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${OPENAI_API_KEY}` },
+        body: JSON.stringify({
+            model: 'gpt-4o-mini',
+            messages: [{ role: 'user', content: prompt }],
+            temperature: 0.7,
+            max_tokens: 1024,
+        }),
+    })
+    if (!res.ok) throw new Error(`OpenAI answer error: ${res.statusText}`)
     const data = await res.json()
-    return data.candidates?.[0]?.content?.parts?.[0]?.text || 'No response generated.'
+    return data.choices?.[0]?.message?.content || 'No response generated.'
 }
 
 // ── Handler ──────────────────────────────────────────────────────────────────
@@ -275,11 +250,11 @@ serve(async (req) => {
         const { query, user_phone } = body
         if (!query) throw new Error('query required')
 
-        // Rate limit
-        const clientIP = req.headers.get('x-forwarded-for') || 'anonymous'
-        const allowed = await checkRateLimit(clientIP)
-        if (!allowed) {
-            return new Response(JSON.stringify({ error: 'Rate limit exceeded. Max 10 queries/hour.' }), {
+        // Rate limit: 15 queries per phone per day
+        const identifier = user_phone || req.headers.get('x-forwarded-for') || 'anonymous'
+        const rl = await checkRateLimit(identifier, 'chat-brain')
+        if (!rl.allowed) {
+            return new Response(JSON.stringify({ error: `Daily AI search limit reached (${rl.limit}/day). Try again tomorrow!` }), {
                 status: 429, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
             })
         }

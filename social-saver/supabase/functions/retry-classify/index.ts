@@ -2,37 +2,32 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
-const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY')!;
+const OPENAI_API_KEY = Deno.env.get('OPENAI_API_KEY')!;
 
 const corsHeaders = {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-// Generate embedding using Gemini gemini-embedding-001
+// Generate embedding using OpenAI text-embedding-3-small
 async function generateEmbedding(text: string): Promise<number[] | null> {
     try {
-        const response = await fetch(
-            `https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent?key=${GEMINI_API_KEY}`,
-            {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    model: 'models/gemini-embedding-001',
-                    content: {
-                        parts: [{ text }]
-                    },
-                }),
-            }
-        );
+        const response = await fetch('https://api.openai.com/v1/embeddings', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${OPENAI_API_KEY}`,
+            },
+            body: JSON.stringify({ model: 'text-embedding-3-small', input: text.slice(0, 8000) }),
+        });
 
         if (!response.ok) {
-            console.error('Gemini Embedding Error:', await response.text());
+            console.error('OpenAI Embedding Error:', await response.text());
             return null;
         }
 
         const data = await response.json();
-        return data.embedding?.values || null;
+        return data.data?.[0]?.embedding || null;
     } catch (e) {
         console.error('Embedding generation failed:', e);
         return null;
@@ -105,22 +100,17 @@ serve(async (req: Request) => {
         const textForLLM = [title, rawText, save.note].filter(Boolean).join(" | ");
         let llmData: any = null;
         for (let attempt = 1; attempt <= 3; attempt++) {
-            const llmRes = await fetch(
-                `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,
-                {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        contents: [{
-                            role: "user",
-                            parts: [{
-                                text: `Classify this saved link into exactly one category: Fitness, Coding, Food, Travel, Design, Business, Self-Improvement, Other. Return ONLY valid JSON (no markdown, no backticks): { "category": "...", "tags": ["...", ...], "summary": "..." }. Summary should be ≤20 words, actionable: what it is + why it matters. Tags: 3-6 lowercase.\n\nURL: ${save.url}\nSource: ${save.source}\nContent: ${textForLLM.slice(0, 500)}`
-                            }]
-                        }],
-                        generationConfig: { temperature: 0.3, maxOutputTokens: 200 },
-                    }),
-                }
-            );
+            const llmRes = await fetch('https://api.openai.com/v1/chat/completions', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${OPENAI_API_KEY}` },
+                body: JSON.stringify({
+                    model: 'gpt-4o-mini',
+                    messages: [{ role: 'user', content: `Classify this saved link into exactly one category: Fitness, Coding, Food, Travel, Design, Business, Self-Improvement, Other. Return ONLY valid JSON (no markdown, no backticks): { "category": "...", "tags": ["...", ...], "summary": "..." }. Summary should be ≤20 words, actionable: what it is + why it matters. Tags: 3-6 lowercase.\n\nURL: ${save.url}\nSource: ${save.source}\nContent: ${textForLLM.slice(0, 500)}` }],
+                    temperature: 0.3,
+                    max_tokens: 200,
+                    response_format: { type: 'json_object' },
+                }),
+            });
             if (!llmRes.ok) {
                 if (llmRes.status === 429) {
                     await new Promise(r => setTimeout(r, attempt * 1500));
@@ -136,9 +126,8 @@ serve(async (req: Request) => {
         let summary = save.summary || "";
 
         try {
-            const rawText = llmData.candidates?.[0]?.content?.parts?.[0]?.text || "";
-            // Strip markdown code fences if present
-            const cleanJson = rawText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+            const rawJson = llmData.choices?.[0]?.message?.content || "";
+            const cleanJson = rawJson.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
             const parsed = JSON.parse(cleanJson);
             category = parsed.category || category;
             tags = Array.isArray(parsed.tags) ? parsed.tags.slice(0, 6) : tags;

@@ -10,9 +10,12 @@ build/
 .env
 .env.local
 .env.*.local
+*.env
+*.env.local
 supabase/.env
 supabase/functions/.env
 *.env.backend
+.env.backend.example
 
 # IDE
 .vscode/
@@ -32,6 +35,7 @@ Thumbs.db
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+pnpm-debug.log*
 
 # Supabase local dev artifacts
 supabase/.branches
@@ -41,7 +45,17 @@ supabase/.temp
 # TypeScript
 *.tsbuildinfo
 
+# Test & debug scripts (temp files)
+test_*.cjs
+test_*.js
+test_*.ts
+trigger_*.cjs
+run_*.js
+
 # Misc
 *.tgz
 .cache/
 coverage/
+.turbo/
+.vercel/
+.netlify/

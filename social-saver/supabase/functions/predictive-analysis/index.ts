@@ -1,7 +1,7 @@
 // @ts-nocheck
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 
-const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY')!
+const OPENAI_API_KEY = Deno.env.get('OPENAI_API_KEY')!
 
 const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
@@ -18,7 +18,7 @@ serve(async (req) => {
 
         if (!save) throw new Error('Save object required')
 
-        if (!GEMINI_API_KEY) {
+        if (!OPENAI_API_KEY) {
             // No API key — return empty suggestions gracefully
             return new Response(JSON.stringify({ suggestions: [] }), {
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -49,31 +49,28 @@ Output ONLY valid JSON.
 
 User saved: Title="${save.title}", Category="${save.category}", Summary="${save.summary}". Suggest 3 follow-ups.`
 
-        const response = await fetch(
-            `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,
-            {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    contents: [{ parts: [{ text: prompt }] }],
-                    generationConfig: {
-                        temperature: 0.7,
-                        responseMimeType: 'application/json',
-                    },
-                }),
-            }
-        )
+        const response = await fetch('https://api.openai.com/v1/chat/completions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/Json', 'Authorization': `Bearer ${OPENAI_API_KEY}` },
+            body: JSON.stringify({
+                model: 'gpt-4o-mini',
+                messages: [{ role: 'user', content: prompt }],
+                temperature: 0.7,
+                max_tokens: 500,
+                response_format: { type: 'json_object' },
+            }),
+        })
 
         const data = await response.json()
 
         if (!response.ok) {
-            console.error('Gemini API error:', JSON.stringify(data))
-            return new Response(JSON.stringify({ suggestions: [], error: 'Gemini API error' }), {
+            console.error('OpenAI API error:', JSON.stringify(data))
+            return new Response(JSON.stringify({ suggestions: [], error: 'OpenAI API error' }), {
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' },
             })
         }
 
-        const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '{}'
+        const text = data?.choices?.[0]?.message?.content || '{}'
         const parsed = JSON.parse(text)
         const suggestions = parsed.suggestions || parsed.items || []
 

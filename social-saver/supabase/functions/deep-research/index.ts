@@ -2,7 +2,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 
-const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY')!
+const OPENAI_API_KEY = Deno.env.get('OPENAI_API_KEY')!
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const SUPABASE_SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 
@@ -45,36 +45,35 @@ async function checkRateLimit(identifier: string): Promise<boolean> {
     return true
 }
 
-// Gemini call with exponential backoff for 429 errors
-async function callGemini(prompt: string): Promise<string> {
+// OpenAI call with exponential backoff for 429 errors
+async function callOpenAI(prompt: string): Promise<string> {
     let lastError: any
     for (let attempt = 1; attempt <= 3; attempt++) {
         try {
-            const res = await fetch(
-                `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,
-                {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        contents: [{ role: 'user', parts: [{ text: prompt }] }],
-                        generationConfig: { temperature: 0.7, maxOutputTokens: 4096 },
-                    }),
-                }
-            )
+            const res = await fetch('https://api.openai.com/v1/chat/completions', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${OPENAI_API_KEY}` },
+                body: JSON.stringify({
+                    model: 'gpt-4o-mini',
+                    messages: [{ role: 'user', content: prompt }],
+                    temperature: 0.7,
+                    max_tokens: 4096,
+                }),
+            })
 
             if (!res.ok) {
                 const errorText = await res.text()
-                console.error(`Gemini error (attempt ${attempt}):`, res.status, errorText)
+                console.error(`OpenAI error (attempt ${attempt}):`, res.status, errorText)
                 if (res.status === 429) {
                     await new Promise(r => setTimeout(r, attempt * 2000))
-                    lastError = new Error(`Gemini 429 quota exceeded`)
+                    lastError = new Error(`OpenAI 429 rate limited`)
                     continue
                 }
-                throw new Error(`Gemini API error: ${res.status}`)
+                throw new Error(`OpenAI API error: ${res.status}`)
             }
 
             const data = await res.json()
-            return data.candidates?.[0]?.content?.parts?.[0]?.text || ''
+            return data.choices?.[0]?.message?.content || ''
         } catch (err) {
             lastError = err
             if (err.message?.includes('429')) {
@@ -118,7 +117,7 @@ Be concise but insightful. Use standard markdown formatting.
 
 Analyze this saved item: "${query}"`
 
-        const dossier = await callGemini(prompt)
+        const dossier = await callOpenAI(prompt)
 
         if (!dossier) throw new Error('No response from Gemini')
 

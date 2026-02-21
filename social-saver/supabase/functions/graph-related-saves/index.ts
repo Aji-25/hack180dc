@@ -61,7 +61,7 @@ serve(async (req) => {
             }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
         }
 
-        const safeLimit = Math.min(limit, 50)
+        const safeLimit = Math.trunc(Math.min(limit, 50))
         const allResults: any[] = []
         const seenSaveIds = new Set<string>()
 

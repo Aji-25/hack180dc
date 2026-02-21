@@ -1,21 +1,22 @@
 // @ts-nocheck
 // supabase/functions/whatsapp-webhook/index.ts
 // Twilio WhatsApp webhook handler — receives messages, extracts URLs,
-// calls Gemini for categorization, saves to Supabase, replies via TwiML.
+// calls OpenAI (GPT-4o-mini + Whisper) for categorization/transcription, saves to Supabase, replies via TwiML.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { DOMParser } from "https://deno.land/x/deno_dom@v0.1.38/deno-dom-wasm.ts";
 import { Readability } from "https://esm.sh/@mozilla/readability@0.4.4";
 import { YoutubeTranscript } from "https://esm.sh/youtube-transcript";
+import { checkRateLimit } from "../_shared/rateLimit.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY")!;
+const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY")!;
 const APP_URL = Deno.env.get("APP_URL") || "https://social-saver.vercel.app";
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
-console.log(`[webhook] GEMINI_API_KEY present: ${!!GEMINI_API_KEY}, length: ${GEMINI_API_KEY?.length || 0}`);
+
 
 const CATEGORIES = [
     "Fitness", "Coding", "Food", "Travel",
@@ -27,26 +28,19 @@ const CATEGORY_EMOJIS: Record<string, string> = {
     Design: "🎨", Business: "💼", "Self-Improvement": "🧠", Other: "📌",
 };
 
-// ── Per-phone Gemini Rate Limiter ─────────────────────────
-// Limits each phone number to MAX_CALLS_PER_WINDOW Gemini calls
-// within WINDOW_MS milliseconds to protect API quota.
+// ── Rate limiting ─────────────────────────────────────────
+// Uses persistent DB-backed rate limits from _shared/rateLimit.ts
+// In-memory cache to avoid redundant DB hits within the same request.
+const _rateLimitCache = new Map<string, { allowed: boolean; ts: number }>();
 
-const WINDOW_MS = 60_000;       // 1 minute window
-const MAX_CALLS_PER_WINDOW = 10; // max Gemini calls per phone per minute
-
-const geminiCallLog = new Map<string, number[]>(); // phone → timestamps[]
-
-function isGeminiRateLimited(phone: string): boolean {
-    const now = Date.now();
-    const window_start = now - WINDOW_MS;
-    const calls = (geminiCallLog.get(phone) || []).filter(t => t > window_start);
-    if (calls.length >= MAX_CALLS_PER_WINDOW) {
-        console.warn(`[rate-limit] ${phone} hit Gemini quota (${calls.length} calls in last 60s)`);
-        return true;
-    }
-    calls.push(now);
-    geminiCallLog.set(phone, calls);
-    return false;
+async function isRateLimited(phone: string, endpoint: string): Promise<boolean> {
+    const key = `${phone}:${endpoint}`;
+    const cached = _rateLimitCache.get(key);
+    // Cache result for 5 seconds to avoid duplicate DB calls within a single webhook invocation
+    if (cached && Date.now() - cached.ts < 5000) return !cached.allowed;
+    const result = await checkRateLimit(phone, endpoint);
+    _rateLimitCache.set(key, { allowed: result.allowed, ts: Date.now() });
+    return !result.allowed;
 }
 
 // ── Helpers ──────────────────────────────────────────────
@@ -155,57 +149,48 @@ async function fetchContent(url: string): Promise<string | null> {
     }
 }
 
-// ── Gemini API Helpers ──────────────────────────────────
+// ── OpenAI API Helpers ──────────────────────────────────
 
-async function callGemini(prompt: string, options: { temperature?: number; maxTokens?: number; jsonMode?: boolean } = {}): Promise<string> {
-    const { temperature = 0.3, maxTokens = 300, jsonMode = false } = options;
+async function callOpenAI(prompt: string, options: { temperature?: number; maxTokens?: number; jsonMode?: boolean } = {}): Promise<string> {
+    const { temperature = 0.3, maxTokens = 500, jsonMode = false } = options;
 
     const body: any = {
-        contents: [
-            {
-                role: 'user',
-                parts: [{ text: prompt }]
-            }
-        ],
-        generationConfig: {
-            temperature,
-            maxOutputTokens: maxTokens,
-        },
+        model: 'gpt-4o-mini',
+        messages: [{ role: 'user', content: prompt }],
+        temperature,
+        max_tokens: maxTokens,
     };
 
-    if (jsonMode) {
-        body.generationConfig.responseMimeType = 'application/json';
-    }
+    if (jsonMode) body.response_format = { type: 'json_object' };
 
     let lastError: any;
     for (let attempt = 1; attempt <= 3; attempt++) {
         try {
-            const res = await fetch(
-                `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,
-                {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(body),
-                }
-            );
+            const res = await fetch('https://api.openai.com/v1/chat/completions', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${OPENAI_API_KEY}`,
+                },
+                body: JSON.stringify(body),
+            });
 
             if (!res.ok) {
                 const text = await res.text();
-                console.error(`Gemini error (Attempt ${attempt}):`, res.status, text);
+                console.error(`OpenAI error (Attempt ${attempt}):`, res.status, text);
                 if (res.status === 429) {
-                    // Quota exhausted, wait and retry
                     await new Promise(r => setTimeout(r, attempt * 1500));
-                    lastError = new Error(`Gemini API 429: ${text}`);
+                    lastError = new Error(`OpenAI API 429: ${text}`);
                     continue;
                 }
-                throw new Error(`Gemini API error: ${res.status}`);
+                throw new Error(`OpenAI API error: ${res.status}`);
             }
 
             const data = await res.json();
-            return data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+            return data.choices?.[0]?.message?.content || '';
         } catch (error) {
             lastError = error;
-            if (error.message.includes('429')) {
+            if (error.message?.includes('429')) {
                 await new Promise(r => setTimeout(r, attempt * 1500));
                 continue;
             }
@@ -217,30 +202,75 @@ async function callGemini(prompt: string, options: { temperature?: number; maxTo
 
 async function generateEmbedding(text: string): Promise<number[] | null> {
     try {
-        const response = await fetch(
-            `https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent?key=${GEMINI_API_KEY}`,
-            {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    model: 'models/gemini-embedding-001',
-                    content: {
-                        parts: [{ text }]
-                    },
-                }),
-            }
-        );
+        const response = await fetch('https://api.openai.com/v1/embeddings', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${OPENAI_API_KEY}`,
+            },
+            body: JSON.stringify({
+                model: 'text-embedding-3-small',
+                input: text.slice(0, 8000),
+            }),
+        });
 
         if (!response.ok) {
-            console.error('Gemini Embedding Error:', await response.text());
+            console.error('OpenAI Embedding Error:', await response.text());
             return null;
         }
 
         const data = await response.json();
-        return data.embedding?.values || null;
+        return data.data?.[0]?.embedding || null;
     } catch (e) {
         console.error('Embedding generation failed:', e);
         return null;
+    }
+}
+
+// ── Whisper Audio Transcription ─────────────────────────
+
+async function transcribeAudio(mediaUrl: string): Promise<string> {
+    try {
+        // Fetch audio from Twilio URL (requires auth)
+        const TWILIO_ACCOUNT_SID = Deno.env.get('TWILIO_ACCOUNT_SID')!;
+        const TWILIO_AUTH_TOKEN = Deno.env.get('TWILIO_AUTH_TOKEN')!;
+        const audioRes = await fetch(mediaUrl, {
+            headers: {
+                'Authorization': `Basic ${btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`)}`,
+            },
+        });
+
+        if (!audioRes.ok) {
+            console.error('[whisper] Failed to download audio:', audioRes.status);
+            return '';
+        }
+
+        const audioBuffer = await audioRes.arrayBuffer();
+        const contentType = audioRes.headers.get('content-type') || 'audio/ogg';
+        const ext = contentType.includes('mp4') ? 'mp4' : contentType.includes('ogg') ? 'ogg' : 'mp3';
+
+        // Build multipart form for Whisper
+        const formData = new FormData();
+        formData.append('file', new Blob([audioBuffer], { type: contentType }), `audio.${ext}`);
+        formData.append('model', 'whisper-1');
+        formData.append('language', 'en');
+
+        const whisperRes = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${OPENAI_API_KEY}` },
+            body: formData,
+        });
+
+        if (!whisperRes.ok) {
+            console.error('[whisper] Error:', await whisperRes.text());
+            return '';
+        }
+
+        const result = await whisperRes.json();
+        return result.text || '';
+    } catch (err) {
+        console.error('[whisper] Transcription failed:', err);
+        return '';
     }
 }
 
@@ -331,8 +361,8 @@ async function classifyWithLLM(
     // Always have a smart fallback ready (no LLM needed)
     const smartFallback = classifyFromURL(url, source, title, description, userNote);
 
-    // Check per-phone rate limit before calling Gemini
-    if (isGeminiRateLimited(phone)) {
+    // Check per-phone rate limit before calling OpenAI
+    if (await isRateLimited(phone, 'classify-llm')) {
         console.log(`[classify] Rate limited for ${phone}, using smart fallback`);
         return smartFallback;
     }
@@ -361,14 +391,15 @@ Title: ${title || "(none)"}
 Description: ${description || "(none)"}
 User note: ${userNote || "(none)"}`;
 
-        const content = await callGemini(prompt, { temperature: 0.3, maxTokens: 250, jsonMode: true });
-        console.log(`[classify] Gemini raw response: "${content?.slice(0, 200)}"`);
+        const content = await callOpenAI(prompt, { temperature: 0.3, maxTokens: 400, jsonMode: true });
+        console.log(`[classify] OpenAI raw response: "${content?.slice(0, 200)}"`);
         if (!content) {
-            console.log("[classify] Empty Gemini response, using smart fallback");
+            console.log("[classify] Empty OpenAI response, using smart fallback");
             return smartFallback;
         }
 
-        const parsed = JSON.parse(content);
+        const cleanContent = content.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '').trim();
+        const parsed = JSON.parse(cleanContent);
         console.log(`[classify] Parsed result: category=${parsed.category}, summary=${parsed.summary?.slice(0, 50)}`);
 
         const category = CATEGORIES.includes(parsed.category) ? parsed.category : "Other";
@@ -389,17 +420,9 @@ User note: ${userNote || "(none)"}`;
     }
 }
 
-// ── Voice → Not supported (Gemini REST API doesn't support audio transcription) ──
 
-async function transcribeAudio(_mediaUrl: string): Promise<string> {
-    // Voice transcription is unavailable — Gemini's REST API does not expose
-    // a simple audio-to-text endpoint like Whisper. Return empty to trigger
-    // the "voice notes unavailable" message in the webhook handler.
-    console.log("Voice transcription unavailable — no supported transcription service.");
-    return "";
-}
 
-// ── Image → Gemini Vision description ──────────────────
+// ── Image → GPT-4o Vision description ────────────────────────────
 
 async function describeImage(mediaUrl: string): Promise<{ title: string; description: string }> {
     try {
@@ -409,42 +432,33 @@ async function describeImage(mediaUrl: string): Promise<{ title: string; descrip
         const base64Image = btoa(String.fromCharCode(...new Uint8Array(imageBuffer)));
         const mimeType = imageRes.headers.get('content-type') || 'image/jpeg';
 
-        const res = await fetch(
-            `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,
-            {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    contents: [{
-                        role: 'user',
-                        parts: [
-                            {
-                                inlineData: {
-                                    mimeType,
-                                    data: base64Image,
-                                }
-                            },
-                            {
-                                text: 'Describe this image concisely. Extract: a short title (max 8 words) and a description (max 30 words). If it\'s a book cover, product, screenshot, recipe, or workout — mention that. Return JSON only: { "title": "...", "description": "..." }'
-                            }
-                        ]
-                    }],
-                    generationConfig: {
-                        temperature: 0.3,
-                        maxOutputTokens: 200,
-                        responseMimeType: 'application/json',
-                    },
-                }),
-            }
-        );
+        const res = await fetch('https://api.openai.com/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${OPENAI_API_KEY}`,
+            },
+            body: JSON.stringify({
+                model: 'gpt-4o-mini',
+                max_tokens: 200,
+                messages: [{
+                    role: 'user',
+                    content: [
+                        { type: 'image_url', image_url: { url: `data:${mimeType};base64,${base64Image}` } },
+                        { type: 'text', text: 'Describe this image concisely. Return ONLY JSON: { "title": "short title max 8 words", "description": "max 30 words" }' },
+                    ],
+                }],
+                response_format: { type: 'json_object' },
+            }),
+        });
 
         if (!res.ok) {
-            console.error("Gemini Vision error:", res.status);
+            console.error("GPT Vision error:", res.status);
             return { title: "Image save", description: "" };
         }
 
         const data = await res.json();
-        const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+        const text = data.choices?.[0]?.message?.content || "{}";
         const parsed = JSON.parse(text);
         return {
             title: parsed.title || "Image save",
@@ -506,18 +520,21 @@ Deno.serve(async (req) => {
             return twimlResponse("Could not identify sender. Please try again.");
         }
 
-        // ── Voice Note ──────────────────────────────────────
+        // ── Voice Note (Whisper) ──────────────────────────────
         if (numMedia > 0 && mediaType.startsWith("audio/")) {
-            console.log("[webhook] Processing voice note...");
+            if (await isRateLimited(from, 'whisper')) {
+                return twimlResponse("🎙️ You've reached your daily voice note limit (5/day). Try again tomorrow!");
+            }
+            console.log("[webhook] Processing voice note via Whisper...");
             const transcript = await transcribeAudio(mediaUrl);
 
             if (!transcript) {
-                return twimlResponse("🎙️ Voice notes are currently unavailable. Please send a text or link instead!");
+                return twimlResponse("🎙️ Voice note received but transcription failed. Please try again or send a text instead!");
             }
 
             const classification = await classifyWithLLM("", "voice", "Voice Note", transcript, body, from);
 
-            await supabase.from("saves").insert({
+            const { data: voiceSave } = await supabase.from("saves").insert({
                 user_phone: from,
                 url: `voice://${Date.now()}`,
                 source: "voice",
@@ -529,7 +546,12 @@ Deno.serve(async (req) => {
                 action_steps: classification.action_steps,
                 note: transcript,
                 status: "complete",
-            });
+            }).select().single();
+
+            if (voiceSave?.id) {
+                const embedding = await generateEmbedding(`${transcript} ${classification.summary}`);
+                if (embedding) await supabase.from('saves').update({ embedding }).eq('id', voiceSave.id);
+            }
 
             const emoji = CATEGORY_EMOJIS[classification.category] || "📌";
             return twimlResponse(
@@ -542,6 +564,9 @@ Deno.serve(async (req) => {
 
         // ── Image / Photo ───────────────────────────────────
         if (numMedia > 0 && mediaType.startsWith("image/")) {
+            if (await isRateLimited(from, 'vision')) {
+                return twimlResponse("📸 You've reached your daily image limit (5/day). Try again tomorrow!");
+            }
             console.log("[webhook] Processing image...");
             const imageInfo = await describeImage(mediaUrl);
 
@@ -572,7 +597,8 @@ Deno.serve(async (req) => {
         }
 
         // Extract URLs from message
-        const urls = extractUrls(body);
+        // Extract URLs from message (cap at 3 to avoid credit abuse)
+        const urls = extractUrls(body).slice(0, 3);
 
         // ── No URLs found: check for pending note ──
         if (urls.length === 0) {
@@ -636,8 +662,12 @@ Deno.serve(async (req) => {
                 const hasMetadata = !!(metadata.title || metadata.description);
                 const content = await fetchContent(url);
 
+                const contentText = content ? content.slice(0, 1000) : "";
+                const mergedDesc = metadata.description || contentText;
+                const userNote = body.replace(url, "").trim();
+
                 const classification = await classifyWithLLM(
-                    url, source, metadata.title, metadata.description, (content || "").slice(0, 1000), from
+                    url, source, metadata.title, mergedDesc, userNote, from
                 );
 
                 const status = hasMetadata ? "complete" : "pending_note";
