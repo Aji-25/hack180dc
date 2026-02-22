@@ -274,9 +274,10 @@ async function classifyWithLLM(
 - "action_steps": array of 2-4 short actionable bullets ONLY for Fitness, Food, or Coding categories. For Fitness: exercises/reps. For Food: key ingredients/steps. For Coding: concepts/commands. For other categories, use empty array [].
 
 Rules:
-- If metadata is sparse, infer from URL structure and source type.
+- ALWAYS generate meaningful output. Even with no metadata, infer from the URL structure (account name, reel ID) and source type.
 - ${isReel ? 'This is a video Reel (short-form video).' : isPost ? 'This is an image/carousel post.' : ''}
-- If insufficient info, use category="Other" and summary="Saved link (add a note to improve)."
+- Extract the account/creator name from the URL path (e.g. instagram.com/grover.fitness → fitness creator, instagram.com/ksi → entertainer KSI).
+- NEVER use "Saved link" or generic placeholders as the summary. Always describe what this content likely is based on any available signals.
 - Never invent specific claims you can't verify from the given info.
 - Always respond with valid JSON only. No markdown, no extra text.
 
@@ -553,9 +554,10 @@ Deno.serve(async (req) => {
                     url, source, metadata.title, mergedDesc, userNote, from
                 );
 
-                const status = hasMetadata ? "complete" : "pending_note";
+                // Always mark complete — GPT now generates meaningful data even without metadata
+                const status = "complete";
 
-                const embedContent = `${metadata.title || ''} ${classification.category} ${classification.summary} ${(content || "").slice(0, 4000)}`;
+                const embedContent = `${metadata.title || classification.title || ''} ${classification.category} ${classification.summary} ${(content || "").slice(0, 4000)}`;
 
                 const { data, error } = await supabase
                     .from("saves")
@@ -564,13 +566,14 @@ Deno.serve(async (req) => {
                             user_phone: userPhone,
                             url,
                             source,
-                            title: metadata.title || null,
+                            title: metadata.title || classification.title || null,
                             raw_text: metadata.description || null,
                             content: content || null,
                             category: classification.category,
                             tags: classification.tags,
                             summary: classification.summary,
                             status,
+                            is_deleted: false,
                         },
                         { onConflict: "user_phone,url_hash", ignoreDuplicates: false }
                     )
