@@ -273,8 +273,10 @@ export default function KnowledgeGraph({ saves, userPhone }) {
     }, [highlightNodes])
 
     const paintLink = useCallback((link, ctx) => {
-        const isHL = highlightLinks.has(link)
         const src = link.source, tgt = link.target
+        // Guard: skip if coordinates aren't ready yet
+        if (!isFinite(src?.x) || !isFinite(src?.y) || !isFinite(tgt?.x) || !isFinite(tgt?.y)) return
+        const isHL = highlightLinks.has(link)
         ctx.beginPath(); ctx.moveTo(src.x, src.y); ctx.lineTo(tgt.x, tgt.y)
         const w = link.weight || 1
         ctx.strokeStyle = isHL
