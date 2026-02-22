@@ -453,15 +453,47 @@ Deno.serve(async (req) => {
                 return twimlResponse("📸 You've reached your daily image limit (5/day). Try again tomorrow!");
             }
             console.log("[webhook] Processing image...");
-            const imageInfo = await describeImage(mediaUrl);
+
+            let finalImageUrl = mediaUrl;
+            try {
+                // Download from Twilio
+                const auth = btoa(`${twilioAccountSid}:${twilioAuthToken}`);
+                const mediaRes = await fetch(mediaUrl, { headers: { 'Authorization': `Basic ${auth}` } });
+
+                if (mediaRes.ok) {
+                    const blob = await mediaRes.blob();
+                    const ext = mediaType.split('/')[1] || 'jpeg';
+                    const fileName = `${userPhone}/${Date.now()}.${ext}`;
+
+                    // Upload to Supabase Storage
+                    const { data, error } = await supabase.storage
+                        .from('whatsapp-media')
+                        .upload(fileName, blob, { contentType: mediaType, upsert: true });
+
+                    if (!error && data?.path) {
+                        const { data: publicUrlData } = supabase.storage
+                            .from('whatsapp-media')
+                            .getPublicUrl(data.path);
+                        finalImageUrl = publicUrlData.publicUrl;
+                    } else {
+                        console.error("[webhook] Storage upload failed:", error);
+                    }
+                } else {
+                    console.error(`[webhook] Twilio fetch failed: ${mediaRes.status}`);
+                }
+            } catch (e) {
+                console.error("[webhook] Failed to transfer image to storage:", e);
+            }
+
+            const imageInfo = await describeImage(finalImageUrl);
 
             const classification = await classifyWithLLM(
-                mediaUrl, "image", imageInfo.title, imageInfo.description, body, from
+                finalImageUrl, "image", imageInfo.title, imageInfo.description, body, from
             );
 
             await supabase.from("saves").insert({
                 user_phone: userPhone,
-                url: mediaUrl,
+                url: finalImageUrl,
                 source: "image",
                 title: imageInfo.title,
                 raw_text: imageInfo.description,
