@@ -279,6 +279,15 @@ export default function SaveCard({ save, onDelete, onUpdate }) {
                                 <LinkIcon className="h-3 w-3" />
                                 Voice Note
                             </span>
+                        ) : url.startsWith('https://api.twilio.com/') ? (
+                            <div className="mt-3 overflow-hidden rounded-lg border border-white/10 bg-black/20">
+                                <img
+                                    src={`${import.meta.env.VITE_EDGE_FUNCTION_URL}/media-proxy?url=${encodeURIComponent(url)}`}
+                                    alt="Saved image from WhatsApp"
+                                    className="max-h-64 object-contain rounded-lg shadow-md mix-blend-screen"
+                                    loading="lazy"
+                                />
+                            </div>
                         ) : (
                             <a
                                 href={url}
