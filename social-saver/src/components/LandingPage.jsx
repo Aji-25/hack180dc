@@ -151,7 +151,7 @@ export default function LandingPage({ onEnterDashboard }) {
                         <Button onClick={onEnterDashboard} size="lg" className="h-14 px-8 text-lg rounded-2xl shadow-[0_0_30px_rgba(124,109,250,0.4)] hover:shadow-[0_0_50px_rgba(124,109,250,0.6)]">
                             Try the Dashboard <ArrowRight className="h-5 w-5" />
                         </Button>
-                        <Button variant="secondary" size="lg" className="h-14 px-8 text-lg rounded-2xl bg-white/5 hover:bg-white/10 border-white/10" onClick={() => window.open('https://wa.me/14155238886?text=join%20something-dark', '_blank')}>
+                        <Button variant="secondary" size="lg" className="h-14 px-8 text-lg rounded-2xl bg-white/5 hover:bg-white/10 border-white/10" onClick={() => window.open('https://wa.me/14155238886?text=join%20step-camp', '_blank')}>
                             <MessageCircle className="h-5 w-5 text-[#25D366]" /> Open WhatsApp
                         </Button>
                     </motion.div>

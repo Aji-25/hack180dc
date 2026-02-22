@@ -30,7 +30,7 @@ export default function EmptyState({ search, category }) {
                         </span>
                     </p>
                     <a
-                        href="https://wa.me/14155238886?text=join%20something-dark"
+                        href="https://wa.me/14155238886?text=join%20step-camp"
                         target="_blank"
                         rel="noopener noreferrer"
                         className="inline-block"
