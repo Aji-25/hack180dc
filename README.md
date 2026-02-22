@@ -57,11 +57,11 @@ Social Saver is a **WhatsApp-first personal knowledge graph**. You text a link, 
 | 🔒 **Server-Mediated DB Access** | Supabase RLS + Edge Fns | Anon key blocked. All reads/writes through service-role-only edge functions |
 | 🛡️ **SHA-256 Phone Hashing** | Deno `crypto.subtle` | Raw phone numbers never touch the DB |
 | 🔐 **Twilio Signature Validation** | HMAC-SHA1 | Every webhook validated — rejected on mismatch |
-| ⏱️ **Timing-Safe Auth** | XOR byte comparison | `DEMO_KEY` comparison uses constant-time logic — brute-force proof |
+| ⏱️ **Timing-Safe Auth** | XOR byte comparison | `DEMO_KEY` comparison uses constant-time logic — timing-attack resistant compare |
 | 🚫 **Fail-Closed Auth** | env check | Missing `DEMO_KEY` → 403. Never silently open access |
 | ⚡ **HNSW Vector Index** | pgvector | O(log n) similarity search — no more full table scans |
 | ⏳ **Persistent Rate Limiting** | Supabase Postgres | Per-phone quotas with rolling windows; survive Deno cold starts |
-| 📡 **Realtime Dashboard** | Supabase WebSockets | New saves appear live — no polling |
+| 📡 **Realtime UX** | Supabase WebSockets | Realtime triggers cache invalidation; UI re-fetches via `get-saves` (server-mediated) |
 | 📅 **Weekly AI Recap** | GPT-4o-mini | Weekly digest: themes, patterns, "try next" suggestions |
 | 📝 **Notion Export** | Notion API | Batch export of all saves with rate-limit handling |
 | 🔁 **Dead-Letter Queue** | Postgres | Failed Neo4j jobs retry 3× then land in `failed_graph_jobs` |
@@ -187,14 +187,14 @@ Entity types: `tool · concept · topic · exercise · food · brand · person �
 | **DB Access Control** | RLS: `service_role` only. Anon key blocked for all 4 operations | ✅ |
 | **Server-Mediated Reads** | All UI reads go through `get-saves` edge fn (service role); direct anon-key queries impossible | ✅ |
 | **Tenant Isolation** | `update-save` / `delete-save` verify `user_phone` hash ownership before mutating | ✅ |
-| **Timing-Safe Key Compare** | `DEMO_KEY` comparison uses XOR byte loop — resistant to timing-based brute force | ✅ |
+| **Timing-Safe Key Compare** | `DEMO_KEY` comparison uses XOR byte loop — timing-attack resistant compare | ✅ |
 | **Fail-Closed Auth** | Missing `DEMO_KEY` → 403. Must set `DEMO_MODE=true` explicitly to open | ✅ |
 | **Twilio Error Scrubbing** | Twilio errors logged server-side only; client receives generic 502 | ✅ |
 | **Env Var Guards** | Missing `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` → explicit startup Error | ✅ |
 | **URL Dedup Hashing** | `url_hash` uses `encode(sha256(url::bytea), 'hex')` — no MD5 collisions | ✅ |
 | **Rate Limiting** | Postgres `rate_limits` — rolling windows, errors checked, resetAt from actual window_start | ✅ |
 | **Dead-Letter Resiliency** | `failed_graph_jobs` table — failed Neo4j jobs preserved, not dropped | ✅ |
-| **OTP Auth + User RLS** | Supabase `auth.uid()` policies | 🔴 Roadmap |
+| **OTP Auth + User RLS** | Supabase `auth.uid()` policies. *Current demo uses a capability link (`?u=<hash>`) for simplicity; production replaces this with true OTP auth.* | 🔴 Roadmap |
 
 > [!CAUTION]
 > **Never use `TWILIO_SKIP_VALIDATION=true` in production.** It disables webhook signature verification, allowing anyone to POST fake WhatsApp messages to your endpoint. Local dev only.
@@ -307,8 +307,14 @@ npx supabase secrets set NEO4J_DATABASE=your-instance-id
 
 ### 5. Deploy Edge Functions
 
+For security, keep Supabase JWT verification ON by default for internal functions, but turn it OFF for the public webhook (which Twilio authenticates via HMAC):
+
 ```bash
-npx supabase functions deploy --no-verify-jwt
+# Public webhook (Twilio) — no JWT
+npx supabase functions deploy whatsapp-webhook --no-verify-jwt
+
+# Everything else — keep JWT verification ON (default)
+npx supabase functions deploy get-saves update-save delete-save chat-brain deep-research graph-query notion-export process-graph-jobs graph-upsert-save random-save predictive-analysis regenerate-embeddings retry-classify send-reminders weekly-recap
 ```
 
 ### 6. Configure Twilio Webhook
@@ -335,12 +341,11 @@ npx playwright test tests/e2e.spec.ts --headed
 | Time | Action | What to Say |
 |---|---|---|
 | 0–7s | Point at the dashboard | *"Most bookmark apps require tagging, folders, naming. Social Saver requires nothing — just WhatsApp."* |
-| 7–20s | Send a YouTube link to the bot | *"I texted a link. The edge function scrapes it, GPT-4o-mini classifies it — appears here in real time over WebSockets."* |
+| 7–20s | Send a YouTube link to the bot | *"I texted a link. The edge function scrapes it, GPT-4o-mini classifies it — appears here in real time."* |
 | 20–30s | Point at the card | *"Category, tags, 20-word summary — zero input from me."* |
 | 30–42s | Type in Ask My Saves | *"This is Hybrid Graph-RAG. Vector similarity plus multi-hop Neo4j traversal — finds connections you'd never tag manually."* |
-| 42–45s | Ask the same question again | *"Same query twice — see the ⚡ badge? Cached. Zero OpenAI tokens, instant response."* |
-| 45–54s | Click Deep Research on a card | *"One click generates a full research dossier — academic context, counter-arguments, what the internet thinks."* |
-| 54–60s | Click Weekly Recap | *"Every week, the AI reviews everything you saved and delivers a personal intelligence briefing. Your second brain, compounding."* |
+| 42–50s | Switch to Graph View | *"If we switch out of the grid, we can visualize the underlying topic extraction dynamically."* |
+| 50–60s | Click Deep Research | *"One click generates a full research dossier — academic context, counter-arguments, and internet consensus. A true second brain."* |
 
 ---
 
