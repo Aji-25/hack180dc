@@ -274,16 +274,23 @@ export default function SaveCard({ save, onDelete, onUpdate }) {
                             {!title && !summary && hostname.includes('instagram.com')
                                 ? 'Instagram Reel/Post - Protected Content'
                                 : (summary || title || 'Saved link')}</h3>
-                        <a
-                            href={url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="flex items-center gap-1.5 text-xs font-medium text-[var(--color-accent)]/80 hover:text-[var(--color-accent)] hover:underline decoration-[var(--color-accent)]/30 underline-offset-2 transition-colors w-fit"
-                        >
-                            <LinkIcon className="h-3 w-3" />
-                            {hostname}
-                            <ExternalLink className="h-2.5 w-2.5 opacity-50" />
-                        </a>
+                        {url.startsWith('voice://') ? (
+                            <span className="flex items-center gap-1.5 text-xs font-medium text-white/40">
+                                <LinkIcon className="h-3 w-3" />
+                                Voice Note
+                            </span>
+                        ) : (
+                            <a
+                                href={url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="flex items-center gap-1.5 text-xs font-medium text-[var(--color-accent)]/80 hover:text-[var(--color-accent)] hover:underline decoration-[var(--color-accent)]/30 underline-offset-2 transition-colors w-fit"
+                            >
+                                <LinkIcon className="h-3 w-3" />
+                                {hostname}
+                                <ExternalLink className="h-2.5 w-2.5 opacity-50" />
+                            </a>
+                        )}
                     </div>
 
                     {/* Action Steps */}

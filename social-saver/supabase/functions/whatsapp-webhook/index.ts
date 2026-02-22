@@ -416,9 +416,9 @@ Deno.serve(async (req) => {
 
             const { data: voiceSave } = await supabase.from("saves").insert({
                 user_phone: userPhone,
-                url: `voice://${Date.now()}`,
+                url: `voice://note-${Date.now()}`,
                 source: "voice",
-                title: "🎙️ Voice Note",
+                title: classification.title || "Voice Note",
                 raw_text: transcript,
                 category: classification.category,
                 tags: classification.tags,
@@ -426,6 +426,7 @@ Deno.serve(async (req) => {
                 action_steps: classification.action_steps,
                 note: transcript,
                 status: "complete",
+                is_deleted: false,
             }).select().single();
 
             // Non-blocking embedding — don't delay the WhatsApp reply
