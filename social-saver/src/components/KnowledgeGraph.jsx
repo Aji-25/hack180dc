@@ -133,13 +133,13 @@ export default function KnowledgeGraph({ saves, userPhone }) {
 
         categories.forEach(cat => {
             const id = `cat-${cat}`
-            nodes.push({ id, label: cat, type: 'category', size: 20, color: getColor('category') })
+            nodes.push({ id, label: cat, type: 'category', size: 30, color: getColor('category') })
             nodeSet.add(id); neighbors[id] = new Set()
         })
         saves.forEach(save => {
             if (nodeSet.has(save.id)) return
             const cat = save.category || 'Other'
-            nodes.push({ id: save.id, label: truncate(save.title || save.summary, 30), type: 'save', size: 8, color: getColor(cat.toLowerCase()), meta: save })
+            nodes.push({ id: save.id, label: truncate(save.title || save.summary, 30), type: 'save', size: 14, color: getColor(cat.toLowerCase()), meta: save })
             nodeSet.add(save.id); neighbors[save.id] = new Set()
             links.push({ source: `cat-${cat}`, target: save.id, weight: 1 })
             neighbors[`cat-${cat}`]?.add(save.id); neighbors[save.id].add(`cat-${cat}`)
@@ -151,7 +151,7 @@ export default function KnowledgeGraph({ saves, userPhone }) {
         Object.entries(tagSaveMap).forEach(([tag, ids]) => {
             const id = `tag-${tag}`
             if (!nodeSet.has(id)) {
-                nodes.push({ id, label: `#${tag}`, type: 'tag', size: 5 + ids.length * 1.5, color: '#6b7280' })
+                nodes.push({ id, label: `#${tag}`, type: 'tag', size: 8 + ids.length * 2, color: '#6b7280' })
                 nodeSet.add(id); neighbors[id] = new Set()
             }
             ids.forEach(sid => {
@@ -225,6 +225,9 @@ export default function KnowledgeGraph({ saves, userPhone }) {
 
     // Custom renderers
     const paintNode = useCallback((node, ctx, globalScale) => {
+        // Guard: node hasn't been positioned yet by the force simulation
+        if (!isFinite(node.x) || !isFinite(node.y)) return
+
         const isHL = highlightNodes.size === 0 || highlightNodes.has(node.id)
         const isHovered = highlightNodes.has(node.id) && highlightNodes.size > 0
         const alpha = isHL ? 1 : 0.15
@@ -314,10 +317,17 @@ export default function KnowledgeGraph({ saves, userPhone }) {
                     backgroundColor="transparent"
                     d3AlphaDecay={0.015}
                     d3VelocityDecay={0.25}
-                    d3Force="charge"
                     warmupTicks={150}
                     cooldownTicks={400}
                     cooldownTime={3000}
+                    onEngineInit={engine => {
+                        engine.d3Force('charge').strength(-280)
+                        engine.d3Force('link')?.distance(link => {
+                            const src = typeof link.source === 'object' ? link.source : {}
+                            return src.type === 'category' ? 120 : 60
+                        })
+                        engine.d3Force('collision', null)
+                    }}
                     onEngineStop={() => {
                         if (graphRef.current) {
                             fgNodes.forEach(n => { n.fx = n.x; n.fy = n.y })
