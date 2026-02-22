@@ -98,7 +98,7 @@ export default function LandingPage({ onEnterDashboard }) {
                     <span className="text-lg font-bold tracking-tight text-white">Social Saver</span>
                 </div>
                 <div className="flex items-center gap-4">
-                    <Button variant="secondary" size="sm" className="hidden sm:flex shadow-[0_0_15px_rgba(255,255,255,0.05)]" onClick={() => window.open('https://github.com/ajitesh18/social-saver', '_blank')}>
+                    <Button variant="secondary" size="sm" className="hidden sm:flex shadow-[0_0_15px_rgba(255,255,255,0.05)]" onClick={() => window.open('https://github.com/Aji-25/hack180dc', '_blank')}>
                         View on GitHub <ExternalLink className="h-4 w-4 ml-1" />
                     </Button>
                 </div>
@@ -283,7 +283,7 @@ export default function LandingPage({ onEnterDashboard }) {
                         Stop losing links in chat history. Start building your personal knowledge base today.
                     </p>
 
-                    <Button size="lg" className="h-14 px-8 text-lg rounded-2xl shadow-xl hover:shadow-[0_0_50px_rgba(124,109,250,0.4)]" onClick={() => window.open('https://github.com/ajitesh18/social-saver', '_blank')}>
+                    <Button size="lg" className="h-14 px-8 text-lg rounded-2xl shadow-xl hover:shadow-[0_0_50px_rgba(124,109,250,0.4)]" onClick={() => window.open('https://github.com/Aji-25/hack180dc', '_blank')}>
                         <Star className="h-5 w-5 mr-2" /> Star on GitHub
                     </Button>
                 </motion.div>

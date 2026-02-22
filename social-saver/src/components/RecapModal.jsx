@@ -2,8 +2,9 @@ import { useState, useMemo, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import { Sparkles, X, Loader2, TrendingUp, Calendar, Zap, Award, Target } from 'lucide-react'
 import { Button } from './ui/Button'
-import { Card } from './ui/Card'
 import { AnimatePresence, motion } from 'framer-motion'
+
+const ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || ''
 
 // Mock recap for local dev
 const MOCK_RECAP = {
@@ -37,8 +38,11 @@ export default function RecapModal({ userPhone, useMock }) {
 
         try {
             const edgeFnUrl = import.meta.env.VITE_EDGE_FUNCTION_URL || ''
-            const res = await fetch(`${edgeFnUrl}/weekly-recap?phone=${encodeURIComponent(userPhone)}`)
+            const res = await fetch(`${edgeFnUrl}/weekly-recap?phone=${encodeURIComponent(userPhone)}`, {
+                headers: { 'Authorization': `Bearer ${ANON_KEY}` }
+            })
             const data = await res.json()
+            if (data.error) throw new Error(data.error)
             setRecap(data)
         } catch (err) {
             console.error('Recap error:', err)
@@ -145,7 +149,7 @@ export default function RecapModal({ userPhone, useMock }) {
                                             <div className="grid grid-cols-2 gap-4">
                                                 <div className="bg-white/5 border border-white/10 rounded-xl p-4 flex flex-col items-center justify-center text-center">
                                                     <span className="text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-white to-white/70">
-                                                        {recap.count}
+                                                        {recap.count ?? 0}
                                                     </span>
                                                     <span className="text-[10px] uppercase tracking-wider font-bold text-white/30 mt-1">Total Saves</span>
                                                 </div>
@@ -153,7 +157,11 @@ export default function RecapModal({ userPhone, useMock }) {
                                                     <div className="absolute inset-0 bg-gradient-to-br from-[var(--color-accent)]/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
                                                     <TrendingUp className="w-5 h-5 text-[var(--color-accent)] mb-2" />
                                                     <span className="text-[10px] uppercase tracking-wider font-bold text-white/30">Most Active</span>
-                                                    <span className="text-xs font-bold text-white/80 mt-1">Fitness & Food</span>
+                                                    <span className="text-xs font-bold text-white/80 mt-1">
+                                                        {recap.categories
+                                                            ? Object.entries(recap.categories).sort((a, b) => b[1] - a[1])[0]?.[0] ?? '—'
+                                                            : '—'}
+                                                    </span>
                                                 </div>
                                             </div>
 

@@ -226,33 +226,45 @@ export default function KnowledgeGraph({ saves, userPhone }) {
     // Custom renderers
     const paintNode = useCallback((node, ctx, globalScale) => {
         const isHL = highlightNodes.size === 0 || highlightNodes.has(node.id)
-        const alpha = isHL ? 1 : 0.12
-        const r = Math.sqrt(node.val || 5) * 2.2
+        const isHovered = highlightNodes.has(node.id) && highlightNodes.size > 0
+        const alpha = isHL ? 1 : 0.15
+        const isCategory = node.type === 'category'
+        // Bigger base radius: category nodes ~18px, save nodes ~8px, others ~11px
+        const baseVal = node.val || 5
+        const r = isCategory ? Math.sqrt(baseVal) * 4.5 : Math.sqrt(baseVal) * 3.2
 
-        if (highlightNodes.size > 0 && highlightNodes.has(node.id)) {
-            ctx.beginPath(); ctx.arc(node.x, node.y, r + 5, 0, 2 * Math.PI)
-            ctx.fillStyle = hexToRgba(node.color, 0.18); ctx.fill()
+        // Glow ring for highlighted / category nodes
+        if (isCategory || isHovered) {
+            const glowR = r + (isHovered ? 8 : 5)
+            const grad = ctx.createRadialGradient(node.x, node.y, r * 0.5, node.x, node.y, glowR)
+            grad.addColorStop(0, hexToRgba(node.color, isHovered ? 0.35 : 0.20))
+            grad.addColorStop(1, hexToRgba(node.color, 0))
+            ctx.beginPath(); ctx.arc(node.x, node.y, glowR, 0, 2 * Math.PI)
+            ctx.fillStyle = grad; ctx.fill()
         }
+
+        // Main node fill
         ctx.beginPath(); ctx.arc(node.x, node.y, r, 0, 2 * Math.PI)
-        ctx.fillStyle = hexToRgba(node.color, alpha); ctx.fill()
+        ctx.fillStyle = hexToRgba(node.color, alpha * (isCategory ? 0.85 : 0.75)); ctx.fill()
 
-        if (node.type === 'category') {
-            ctx.strokeStyle = hexToRgba(node.color, alpha * 0.6)
-            ctx.lineWidth = 1.5; ctx.stroke()
-        }
+        // Border ring
+        ctx.strokeStyle = hexToRgba(node.color, alpha * (isCategory ? 0.9 : 0.5))
+        ctx.lineWidth = isCategory ? 2 : 1;
+        ctx.stroke()
 
-        const showLabel = node.type === 'category'
-            || globalScale > 0.9
-            || highlightNodes.has(node.id)
+        // Label
+        const showLabel = isCategory || globalScale > 0.85 || isHovered
 
         if (showLabel) {
-            const fs = (node.type === 'category' ? 13 : 10) / globalScale
-            ctx.font = `${node.type === 'category' ? 'bold' : '500'} ${fs}px Inter,sans-serif`
+            const fs = Math.max(4, (isCategory ? 13 : 9) / globalScale)
+            ctx.font = `${isCategory ? 'bold' : '500'} ${fs}px Inter,sans-serif`
             ctx.textAlign = 'center'; ctx.textBaseline = 'top'
             const label = truncate(node.label, 22)
-            ctx.fillStyle = `rgba(0,0,0,${alpha * 0.7})`
-            ctx.fillText(label, node.x + 0.5, node.y + r + 4.5)
-            ctx.fillStyle = node.type === 'category' ? hexToRgba('#fff', alpha) : hexToRgba('#e5e7eb', alpha * 0.9)
+            // Shadow
+            ctx.fillStyle = `rgba(0,0,0,${alpha * 0.8})`
+            ctx.fillText(label, node.x + 0.8, node.y + r + 4.8)
+            // Text
+            ctx.fillStyle = isCategory ? hexToRgba('#ffffff', alpha) : hexToRgba('#d1d5db', alpha * 0.9)
             ctx.fillText(label, node.x, node.y + r + 4)
         }
     }, [highlightNodes])
@@ -263,9 +275,9 @@ export default function KnowledgeGraph({ saves, userPhone }) {
         ctx.beginPath(); ctx.moveTo(src.x, src.y); ctx.lineTo(tgt.x, tgt.y)
         const w = link.weight || 1
         ctx.strokeStyle = isHL
-            ? `rgba(139,92,246,${Math.min(0.8, w * 0.3 + 0.3)})`
-            : (highlightLinks.size > 0 ? 'rgba(107,114,128,0.04)' : `rgba(107,114,128,${Math.min(0.25, w * 0.1 + 0.08)})`)
-        ctx.lineWidth = isHL ? Math.min(w * 0.6 + 0.8, 3) : 0.8
+            ? `rgba(139,92,246,${Math.min(0.9, w * 0.4 + 0.4)})`
+            : (highlightLinks.size > 0 ? 'rgba(107,114,128,0.05)' : `rgba(148,163,184,${Math.min(0.30, w * 0.12 + 0.10)})`)
+        ctx.lineWidth = isHL ? Math.min(w * 0.8 + 1.2, 3.5) : 1.0
         ctx.stroke()
     }, [highlightLinks])
 
@@ -293,27 +305,29 @@ export default function KnowledgeGraph({ saves, userPhone }) {
                     graphData={{ nodes: fgNodes, links: fgLinks }}
                     nodeCanvasObject={paintNode}
                     nodePointerAreaPaint={(node, color, ctx) => {
-                        const r = Math.sqrt(node.val || 5) * 2.2 + 5
+                        const isCategory = node.type === 'category'
+                        const r = (isCategory ? Math.sqrt(node.val || 5) * 4.5 : Math.sqrt(node.val || 5) * 3.2) + 8
                         ctx.beginPath(); ctx.arc(node.x, node.y, r, 0, 2 * Math.PI)
                         ctx.fillStyle = color; ctx.fill()
                     }}
                     linkCanvasObject={paintLink}
                     backgroundColor="transparent"
-                    d3AlphaDecay={0.02}
-                    d3VelocityDecay={0.4}
-                    warmupTicks={120}
-                    cooldownTicks={300}
-                    cooldownTime={2000}
+                    d3AlphaDecay={0.015}
+                    d3VelocityDecay={0.25}
+                    d3Force="charge"
+                    warmupTicks={150}
+                    cooldownTicks={400}
+                    cooldownTime={3000}
                     onEngineStop={() => {
                         if (graphRef.current) {
                             fgNodes.forEach(n => { n.fx = n.x; n.fy = n.y })
-                            graphRef.current.zoomToFit(400, 60)
+                            graphRef.current.zoomToFit(600, 80)
                         }
                     }}
                     onNodeHover={handleNodeHover}
                     onNodeClick={handleNodeClick}
                     onBackgroundClick={() => setDrawerNode(null)}
-                    enableNodeDrag={false}
+                    enableNodeDrag={true}
                     enableZoomInteraction={true}
                     enablePanInteraction={true}
                 />

@@ -207,7 +207,7 @@ serve(async (req) => {
 
         // Fetch save from Postgres
         const { data: save, error: fetchErr } = await supabase
-            .from('saves').select('*').eq('id', save_id).eq('is_deleted', false).single()
+            .from('saves').select('*').eq('id', save_id).neq('is_deleted', true).single()
         if (fetchErr || !save) throw new Error(`Save not found: ${save_id}`)
 
         // Extract entities

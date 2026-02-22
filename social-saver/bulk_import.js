@@ -139,6 +139,7 @@ async function run() {
                     tags: classification.tags || [source],
                     summary: classification.summary || 'Saved link.',
                     status: 'complete',
+                    is_deleted: false,
                     embedding,
                 }, { onConflict: 'user_phone,url_hash', ignoreDuplicates: true })
                 .select('id')

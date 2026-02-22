@@ -160,11 +160,23 @@ export default function SaveCard({ save, onDelete, onUpdate }) {
     }
 
     const handleShare = async () => {
+        const shareData = { title: title || summary || 'Saved link', url }
         try {
-            await navigator.clipboard.writeText(url)
-            toast.success('Link copied!')
-        } catch {
-            prompt('Copy this link:', url)
+            if (navigator.share && navigator.canShare?.(shareData)) {
+                await navigator.share(shareData)
+            } else {
+                await navigator.clipboard.writeText(url)
+                toast.success('Link copied!')
+            }
+        } catch (e) {
+            if (e?.name !== 'AbortError') {
+                try {
+                    await navigator.clipboard.writeText(url)
+                    toast.success('Link copied!')
+                } catch {
+                    prompt('Copy this link:', url)
+                }
+            }
         }
     }
 
@@ -396,7 +408,7 @@ export default function SaveCard({ save, onDelete, onUpdate }) {
                     </div>
 
                     {/* Actions */}
-                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+                    <div className="flex items-center gap-1">
                         <Button
                             variant="ghost"
                             size="icon"
