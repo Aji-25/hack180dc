@@ -11,7 +11,8 @@ import { checkRateLimit } from "../_shared/rateLimit.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-const APP_URL = Deno.env.get("APP_URL") || "https://social-saver.vercel.app";
+const WEBHOOK_URL = Deno.env.get("APP_URL") || `https://${Deno.env.get("SUPA_PROJECT_ID")}.supabase.co/functions/v1/whatsapp-webhook`;
+const FRONTEND_URL = Deno.env.get("FRONTEND_URL") || "https://hack180dc.vercel.app";
 
 import twilio from "npm:twilio";
 import { callOpenAI, generateEmbedding, transcribeAudio, describeImage } from "../_shared/llm.ts";
@@ -368,7 +369,7 @@ Deno.serve(async (req) => {
         // Use the canonical public URL (APP_URL env var) for Twilio signature validation.
         // req.url and x-forwarded-host are unreliable inside Supabase Edge — Twilio signs
         // against the public URL as configured in the Twilio console.
-        const urlToValidate = `${APP_URL}`;
+        const urlToValidate = `${WEBHOOK_URL}`;
 
         const isValid = twilio.validateRequest(
             twilioAuthToken,
@@ -440,7 +441,7 @@ Deno.serve(async (req) => {
                 `🎙️ Voice note saved! ${emoji} ${classification.category}\n` +
                 `📝 ${classification.summary}\n\n` +
                 `💬 "${transcript.slice(0, 100)}${transcript.length > 100 ? '...' : ''}"\n\n` +
-                `🔗 Dashboard: ${APP_URL}/?u=${encodeURIComponent(userPhone)}`
+                `🔗 Dashboard: ${FRONTEND_URL}/?u=${encodeURIComponent(userPhone)}`
             );
         }
 
@@ -474,7 +475,7 @@ Deno.serve(async (req) => {
             return twimlResponse(
                 `📸 Image saved! ${emoji} ${classification.category}\n` +
                 `📝 ${classification.summary}\n\n` +
-                `🔗 Dashboard: ${APP_URL}/?u=${encodeURIComponent(userPhone)}`
+                `🔗 Dashboard: ${FRONTEND_URL}/?u=${encodeURIComponent(userPhone)}`
             );
         }
 
@@ -524,13 +525,13 @@ Deno.serve(async (req) => {
                     `Note added & re-categorized! ${emoji}\n` +
                     `📂 ${result.category}\n` +
                     `📝 ${result.summary}\n\n` +
-                    `🔗 Dashboard: ${APP_URL}/?u=${encodeURIComponent(userPhone)}`
+                    `🔗 Dashboard: ${FRONTEND_URL}/?u=${encodeURIComponent(userPhone)}`
                 );
             }
 
             return twimlResponse(
                 "👋 Hey! Send me an Instagram (or any) link and I'll save it to your dashboard.\n\n" +
-                `🔗 Your dashboard: ${APP_URL}/?u=${encodeURIComponent(userPhone)}`
+                `🔗 Your dashboard: ${FRONTEND_URL}/?u=${encodeURIComponent(userPhone)}`
             );
         }
 
@@ -641,7 +642,7 @@ Deno.serve(async (req) => {
         }
 
         const reply = results.join("\n\n") +
-            `\n\n🔗 Dashboard: ${APP_URL}/?u=${encodeURIComponent(userPhone)}`;
+            `\n\n🔗 Dashboard: ${FRONTEND_URL}/?u=${encodeURIComponent(userPhone)}`;
 
         return twimlResponse(reply);
     } catch (err) {
