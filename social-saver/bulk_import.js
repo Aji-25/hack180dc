@@ -9,9 +9,8 @@ const SUPABASE_URL = 'https://hxiwxeihlobarzphvvqi.supabase.co';
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const OPENAI_KEY = process.env.OPENAI_API_KEY;
 
-// This is the sha256 hash of "whatsapp:+919391219400" (the step-camp sandbox number)
-// It IS the user_phone for ALL inserts
-const USER_PHONE = '5875284806cb2e2cd928b6dff55ad0854811295bb14ac31c2fd8442fddd3703f';
+// This is the real user_phone hash (sha256 of the user's actual WhatsApp number)
+const USER_PHONE = '36dc0f42e42518dc6867b9e07880ba9c6c14f3556f0518a29e26598188cbe140';
 
 // ── PASTE YOUR LINKS HERE ────────────────────────────────────────────────────
 const LINKS = [
