@@ -14,7 +14,7 @@
 
 *Send a link. AI classifies it. The graph stores it. You search, recap, and rediscover it.*
 
-**[Open Live Demo](https://hack180dc.vercel.app)** &nbsp;|&nbsp; **[GitHub Repository](https://github.com/Aji-25/hack180dc)**
+**[Open Live Demo](https://hack180dc.vercel.app)** &nbsp;|&nbsp; **[GitHub Repository](https://github.com/Aji-25/hack180dc)** &nbsp;|&nbsp; **[Video Explanation](https://drive.google.com/file/d/1o0gUrSXayH9iRdB2UcIyPBbn4B4M7OBW/view?usp=sharing)**
 
 </div>
 
