@@ -2,8 +2,8 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 
-const OPENAI_API_KEY = Deno.env.get('OPENAI_API_KEY')!
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
+import { callOpenAI } from '../_shared/llm.ts'
 const SUPABASE_SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY)
@@ -45,46 +45,7 @@ async function checkRateLimit(identifier: string): Promise<boolean> {
     return true
 }
 
-// OpenAI call with exponential backoff for 429 errors
-async function callOpenAI(prompt: string): Promise<string> {
-    let lastError: any
-    for (let attempt = 1; attempt <= 3; attempt++) {
-        try {
-            const res = await fetch('https://api.openai.com/v1/chat/completions', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${OPENAI_API_KEY}` },
-                body: JSON.stringify({
-                    model: 'gpt-4o-mini',
-                    messages: [{ role: 'user', content: prompt }],
-                    temperature: 0.7,
-                    max_tokens: 4096,
-                }),
-            })
 
-            if (!res.ok) {
-                const errorText = await res.text()
-                console.error(`OpenAI error (attempt ${attempt}):`, res.status, errorText)
-                if (res.status === 429) {
-                    await new Promise(r => setTimeout(r, attempt * 2000))
-                    lastError = new Error(`OpenAI 429 rate limited`)
-                    continue
-                }
-                throw new Error(`OpenAI API error: ${res.status}`)
-            }
-
-            const data = await res.json()
-            return data.choices?.[0]?.message?.content || ''
-        } catch (err) {
-            lastError = err
-            if (err.message?.includes('429')) {
-                await new Promise(r => setTimeout(r, attempt * 2000))
-                continue
-            }
-            throw err
-        }
-    }
-    throw lastError
-}
 
 serve(async (req) => {
     if (req.method === 'OPTIONS') {
@@ -117,9 +78,9 @@ Be concise but insightful. Use standard markdown formatting.
 
 Analyze this saved item: "${query}"`
 
-        const dossier = await callOpenAI(prompt)
+        const dossier = await callOpenAI(prompt, { temperature: 0.7, maxTokens: 4096, jsonMode: false })
 
-        if (!dossier) throw new Error('No response from Gemini')
+        if (!dossier) throw new Error('OpenAI returned an empty or malformed response')
 
         return new Response(JSON.stringify({ dossier }), {
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -131,14 +92,14 @@ Analyze this saved item: "${query}"`
         if (error.message?.includes('429')) {
             const fallback = `## ⏳ AI Research Temporarily Unavailable
 
-The Gemini API is currently rate-limited. Here are some quick resources you can use instead:
+The AI service is currently rate-limited. Here are some quick resources you can use instead:
 
 **🔍 Search for this topic on:**
 - [Google Scholar](https://scholar.google.com/scholar?q=${encodeURIComponent(query || '')})
 - [Hacker News](https://hn.algolia.com/?q=${encodeURIComponent(query || '')})
 - [Reddit](https://www.reddit.com/search/?q=${encodeURIComponent(query || '')})
 
-*The AI deep-dive will be available again in ~1 minute once the API rate limit resets.*`
+*Please try again later.*`
             return new Response(JSON.stringify({ dossier: fallback }), {
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' },
             })

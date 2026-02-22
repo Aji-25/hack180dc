@@ -1,7 +1,10 @@
 // @ts-nocheck
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 
-const OPENAI_API_KEY = Deno.env.get('OPENAI_API_KEY')!
+const SUPABASE_URL = Deno.env.get('SUPABASE_URL')
+import { callOpenAI } from "../_shared/llm.ts"
+const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
 
 const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
@@ -18,7 +21,7 @@ serve(async (req) => {
 
         if (!save) throw new Error('Save object required')
 
-        if (!OPENAI_API_KEY) {
+        if (!Deno.env.get('OPENAI_API_KEY')) {
             // No API key — return empty suggestions gracefully
             return new Response(JSON.stringify({ suggestions: [] }), {
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -49,32 +52,34 @@ Output ONLY valid JSON.
 
 User saved: Title="${save.title}", Category="${save.category}", Summary="${save.summary}". Suggest 3 follow-ups.`
 
-        const response = await fetch('https://api.openai.com/v1/chat/completions', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/Json', 'Authorization': `Bearer ${OPENAI_API_KEY}` },
-            body: JSON.stringify({
-                model: 'gpt-4o-mini',
-                messages: [{ role: 'user', content: prompt }],
-                temperature: 0.7,
-                max_tokens: 500,
-                response_format: { type: 'json_object' },
-            }),
-        })
-
-        const data = await response.json()
-
-        if (!response.ok) {
-            console.error('OpenAI API error:', JSON.stringify(data))
+        let suggestions: any[] = []
+        try {
+            const text = await callOpenAI(prompt, { temperature: 0.7, maxTokens: 500, jsonMode: true })
+            const parsed = JSON.parse(text || '{}')
+            suggestions = parsed.suggestions || parsed.items || []
+        } catch (err: any) {
+            console.error('OpenAI API error:', err.message)
             return new Response(JSON.stringify({ suggestions: [], error: 'OpenAI API error' }), {
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' },
             })
         }
 
-        const text = data?.choices?.[0]?.message?.content || '{}'
-        const parsed = JSON.parse(text)
-        const suggestions = parsed.suggestions || parsed.items || []
+        // If not run locally via a direct frontend ping, and we have a valid save ID, update the row
+        if (save.id && SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY) {
+            const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+            const { error: updateError } = await supabase
+                .from('saves')
+                .update({ predictions: suggestions })
+                .eq('id', save.id)
 
-        return new Response(JSON.stringify({ suggestions }), {
+            if (updateError) {
+                console.error('Failed to save predictions to DB:', updateError.message)
+            } else {
+                console.log(`Saved ${suggestions.length} predictions for save ${save.id}`)
+            }
+        }
+
+        return new Response(JSON.stringify({ success: true, suggestions }), {
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         })
 

@@ -1,61 +1,103 @@
-# Dependencies
+# ─────────────────────────────────────────────────────────────────────────────
+# Social Saver — .gitignore
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── Dependencies ──────────────────────────────────────────────────────────────
 node_modules/
 
-# Build output
+# ── Build output ──────────────────────────────────────────────────────────────
 dist/
 build/
 .output/
 
-# Environment variables & secrets — NEVER commit these
+# ── Environment variables & secrets — NEVER commit these ─────────────────────
 .env
 .env.local
 .env.*.local
+.env.production
 *.env
 *.env.local
 supabase/.env
 supabase/functions/.env
 *.env.backend
-.env.backend.example
 
-# IDE
+# ── API keys & secrets (extra safety net) ─────────────────────────────────────
+.gemini_key.txt
+*_key.txt
+*_secret.txt
+*.pem
+*.key
+
+# ── IDE ───────────────────────────────────────────────────────────────────────
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
 
-# OS
+# ── OS ────────────────────────────────────────────────────────────────────────
 .DS_Store
 .DS_Store?
 ._*
 Thumbs.db
+ehthumbs.db
+desktop.ini
 
-# Logs
+# ── Logs ──────────────────────────────────────────────────────────────────────
 *.log
+logs/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
+lerna-debug.log*
 
-# Supabase local dev artifacts
+# ── Supabase local dev artifacts ──────────────────────────────────────────────
 supabase/.branches
 supabase/.temp
 .supabase/
 
-# TypeScript
+# ── TypeScript ────────────────────────────────────────────────────────────────
 *.tsbuildinfo
 
-# Test & debug scripts (temp files)
+# ── Playwright (E2E test output) ─────────────────────────────────────────────
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/
+
+# ── Temp test & debug scripts (ad-hoc one-off files) ─────────────────────────
+# Named utilities like trigger_graph.js and fetch_logs.js are NOT ignored.
 test_*.cjs
 test_*.js
+test_*.mjs
 test_*.ts
-trigger_*.cjs
 run_*.js
+debug_*.js
+debug_*.ts
+_scratch_*.js
+_scratch_*.ts
 
-# Misc
+# ── Test output / log dumps ───────────────────────────────────────────────────
+test_output*.txt
+test_output*.json
+*.output.txt
+
+# ── Package managers ──────────────────────────────────────────────────────────
+.pnp
+.pnp.js
+.yarn/install-state.gz
+
+# ── Deployment ────────────────────────────────────────────────────────────────
+.vercel/
+.netlify/
+
+# ── Misc ──────────────────────────────────────────────────────────────────────
 *.tgz
 .cache/
 coverage/
 .turbo/
-.vercel/
-.netlify/
+
+# ── Deno cache ────────────────────────────────────────────────────────────────
+.deno/
+deno.lock

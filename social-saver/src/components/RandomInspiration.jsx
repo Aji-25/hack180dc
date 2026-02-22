@@ -1,9 +1,11 @@
 import { useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Shuffle, X, ArrowUpRight, Sparkles } from 'lucide-react'
-import { supabase } from '../lib/supabase'
 import { Button } from './ui/Button'
 import { AnimatePresence, motion } from 'framer-motion'
+
+const EDGE_FN_URL = import.meta.env.VITE_EDGE_FUNCTION_URL || ''
+const ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || ''
 
 export default function RandomInspiration({ userPhone }) {
     const [item, setItem] = useState(null)
@@ -13,25 +15,13 @@ export default function RandomInspiration({ userPhone }) {
     const fetchRandom = async () => {
         setLoading(true)
         if (!open) setOpen(true)
-
         try {
-            let countQuery = supabase
-                .from('saves')
-                .select('*', { count: 'exact', head: true })
-                .eq('status', 'complete')
-
-            if (userPhone) countQuery = countQuery.eq('user_phone', userPhone)
-
-            const { count } = await countQuery
-            if (count && count > 0) {
-                const offset = Math.floor(Math.random() * count)
-                let q = supabase.from('saves').select('*').eq('status', 'complete').range(offset, offset)
-                if (userPhone) q = q.eq('user_phone', userPhone)
-                const { data } = await q
-                if (data?.[0]) {
-                    setItem(data[0])
-                }
-            }
+            const res = await fetch(
+                `${EDGE_FN_URL}/get-saves?random=true&phone=${encodeURIComponent(userPhone || '')}`,
+                { headers: { Authorization: `Bearer ${ANON_KEY}` } }
+            )
+            const data = await res.json()
+            if (data && data.id) setItem(data)
         } catch (e) { console.error(e) }
         setLoading(false)
     }

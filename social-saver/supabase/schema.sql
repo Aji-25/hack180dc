@@ -20,7 +20,11 @@ CREATE TABLE IF NOT EXISTS saves (
     -- 'pending_note' | 'complete' | 'error'
     error_msg TEXT,
     -- stores last error for debugging
-    action_steps TEXT [] DEFAULT '{}' -- actionable steps extracted by LLM
+    action_steps TEXT [] DEFAULT '{}',
+    -- actionable steps extracted by LLM
+    predictions JSONB DEFAULT '[]'::jsonb,
+    -- AI predictive analysis
+    is_deleted BOOLEAN DEFAULT FALSE -- soft deletes
 );
 -- Unique constraint: same user can't save same URL twice (dedup)
 CREATE UNIQUE INDEX idx_saves_user_url ON saves (user_phone, url_hash);
@@ -40,11 +44,14 @@ RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
 -- Create trigger to invoke the function
-DROP TRIGGER IF EXISTS on_save_created ON saves;
 CREATE TRIGGER on_save_created BEFORE
 INSERT
     OR
-UPDATE ON saves FOR EACH ROW EXECUTE PROCEDURE handle_new_save();
+UPDATE OF summary,
+    title,
+    note,
+    url,
+    tags ON saves FOR EACH ROW EXECUTE FUNCTION handle_new_save();
 CREATE INDEX IF NOT EXISTS idx_saves_fts ON saves USING GIN (fts);
 -- Row Level Security
 ALTER TABLE saves ENABLE ROW LEVEL SECURITY;

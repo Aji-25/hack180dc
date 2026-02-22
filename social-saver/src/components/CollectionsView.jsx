@@ -42,6 +42,7 @@ export default function CollectionsView({ saves, onDelete, onUpdate }) {
                     >
                         <button
                             onClick={() => toggleCollapse(cat)}
+                            aria-expanded={!isCollapsed}
                             className={cn(
                                 "w-full flex items-center justify-between p-4 hover:bg-white/5 transition-colors",
                                 !isCollapsed && "border-b border-white/5"

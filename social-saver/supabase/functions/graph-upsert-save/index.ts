@@ -10,8 +10,8 @@ import {
 } from '../_shared/neo4j.ts'
 import { checkDemoKey } from '../_shared/auth.ts'
 
-const OPENAI_API_KEY = Deno.env.get('OPENAI_API_KEY')!
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
+import { callOpenAI } from '../_shared/llm.ts'
 const SUPABASE_SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 
@@ -65,21 +65,12 @@ Return ONLY valid JSON matching this schema exactly:
 
 async function extractEntities(save: any): Promise<{ entities: any[]; relations: any[] }> {
     const prompt = EXTRACT_PROMPT(save)
-    const res = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${OPENAI_API_KEY}` },
-        body: JSON.stringify({
-            model: 'gpt-4o-mini',
-            messages: [{ role: 'user', content: prompt }],
-            temperature: 0.1,
-            max_tokens: 1024,
-            response_format: { type: 'json_object' },
-        }),
-    })
-
-    if (!res.ok) throw new Error(`OpenAI extraction error: ${res.statusText}`)
-    const data = await res.json()
-    const text = data.choices?.[0]?.message?.content || '{}'
+    let text = '{}'
+    try {
+        text = await callOpenAI(prompt, { temperature: 0.1, maxTokens: 1024, jsonMode: true })
+    } catch (e) {
+        throw new Error(`OpenAI extraction error: ${e.message}`)
+    }
 
     try {
         const parsed = JSON.parse(text)
@@ -216,7 +207,7 @@ serve(async (req) => {
 
         // Fetch save from Postgres
         const { data: save, error: fetchErr } = await supabase
-            .from('saves').select('*').eq('id', save_id).single()
+            .from('saves').select('*').eq('id', save_id).eq('is_deleted', false).single()
         if (fetchErr || !save) throw new Error(`Save not found: ${save_id}`)
 
         // Extract entities

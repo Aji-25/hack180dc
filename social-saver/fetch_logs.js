@@ -1,9 +1,13 @@
 const { execSync } = require('child_process');
 
 try {
-  // Use supabase CLI to get logs
-  const output = execSync('npx supabase functions logs whatsapp-webhook', { encoding: 'utf-8' });
+  // Use supabase CLI to get logs (30s timeout to prevent indefinite hang)
+  const output = execSync('npx supabase functions logs whatsapp-webhook', {
+    encoding: 'utf-8',
+    timeout: 30000,
+  });
   console.log(output);
 } catch (error) {
-  console.error(error.stdout || error.message);
+  // error.stderr contains the actual CLI error output from execSync failures
+  console.error(error.stderr || error.message);
 }

@@ -23,16 +23,20 @@ export default function EmptyState({ search, category }) {
                     </div>
                     <h3 className="text-2xl font-bold text-white mb-3 tracking-tight">No saves yet</h3>
                     <p className="text-white/50 text-base max-w-sm mx-auto mb-8 leading-relaxed">
-                        Your library is empty. Forward an Instagram link to the WhatsApp bot and it will appear here instantly.
+                        Your library is empty. Message our WhatsApp bot to start saving:
+                        <br />
+                        <span className="font-mono text-[var(--color-accent)] mt-2 block">
+                            +1 415 523 8886
+                        </span>
                     </p>
                     <a
-                        href="https://wa.me/14155238886"
+                        href="https://wa.me/14155238886?text=join%20something-dark"
                         target="_blank"
                         rel="noopener noreferrer"
                         className="inline-block"
                     >
                         <Button className="shadow-lg shadow-[var(--color-accent)]/20">
-                            Open WhatsApp <ArrowUpRight className="w-4 h-4 ml-2" />
+                            Click here to message our bot <ArrowUpRight className="w-4 h-4 ml-2" />
                         </Button>
                     </a>
                 </div>

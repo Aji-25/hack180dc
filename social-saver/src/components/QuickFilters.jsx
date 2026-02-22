@@ -1,5 +1,4 @@
 import { Filter, Instagram, StickyNote, Clock } from 'lucide-react'
-import { Badge } from './ui/Badge'
 import { cn } from '../lib/utils'
 
 const FILTERS = [
@@ -20,6 +19,7 @@ export default function QuickFilters({ active, onToggle }) {
                     <button
                         key={key}
                         onClick={() => onToggle(key)}
+                        aria-pressed={isActive}
                         className={cn(
                             "group inline-flex h-7 shrink-0 items-center gap-1.5 rounded-lg border px-2.5 text-xs font-medium transition-all",
                             isActive

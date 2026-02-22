@@ -102,37 +102,29 @@ function App() {
                 return
             }
 
-            let query = supabase
-                .from('saves')
-                .select('*')
-                .order('created_at', { ascending: false })
-
-            if (userPhone) query = query.eq('user_phone', userPhone)
-            if (category && category !== 'All') query = query.eq('category', category)
-
-            if (search && search.trim().length > 0) {
-                query = query.textSearch('fts', search.trim(), { type: 'websearch' })
-            }
-
-            if (quickFilters.includes('instagram')) {
-                query = query.eq('source', 'instagram')
-            }
-            if (quickFilters.includes('withNotes')) {
-                query = query.not('note', 'is', null)
-            }
+            // Build query params for get-saves edge function
+            const params = new URLSearchParams({ phone: userPhone, limit: '50' })
+            if (category && category !== 'All') params.set('category', category)
+            if (search && search.trim()) params.set('search', search.trim())
+            if (quickFilters.includes('instagram')) params.set('source', 'instagram')
+            if (quickFilters.includes('withNotes')) params.set('with_notes', 'true')
             if (quickFilters.includes('recent')) {
-                const weekAgo = new Date(Date.now() - 7 * 86400000).toISOString()
-                query = query.gte('created_at', weekAgo)
+                params.set('recent_since', new Date(Date.now() - 7 * 86400000).toISOString())
             }
 
-            query = query.limit(50)
-            const { data, error } = await query
+            const edgeFnUrl = import.meta.env.VITE_EDGE_FUNCTION_URL || ''
+            const res = await fetch(`${edgeFnUrl}/get-saves?${params}`, {
+                headers: { Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}` },
+            })
 
-            if (error) {
-                console.error('Fetch error:', error)
+            if (!res.ok) throw new Error(`get-saves: ${res.status}`)
+            const data = await res.json()
+
+            if (data.error) {
+                console.error('Fetch error:', data.error)
                 setSaves(applyQuickFilters(MOCK_SAVES))
             } else {
-                setSaves(data || [])
+                setSaves(Array.isArray(data) ? data : [])
             }
         } catch (err) {
             console.error('Fetch failed:', err)
@@ -150,11 +142,14 @@ function App() {
             setStats({ total: MOCK_SAVES.length, categories: cats, weekCount })
             return
         }
+        if (!userPhone) return
         try {
-            let query = supabase.from('saves').select('category, created_at')
-            if (userPhone) query = query.eq('user_phone', userPhone)
-            const { data, error } = await query
-            if (!error && data) {
+            const edgeFnUrl = import.meta.env.VITE_EDGE_FUNCTION_URL || ''
+            const res = await fetch(`${edgeFnUrl}/get-saves?stats=true&phone=${encodeURIComponent(userPhone)}`, {
+                headers: { Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}` },
+            })
+            const data = await res.json()
+            if (!data.error && Array.isArray(data)) {
                 const cats = {}
                 const weekAgo = Date.now() - 7 * 86400000
                 let weekCount = 0
@@ -170,55 +165,28 @@ function App() {
     useEffect(() => { fetchSaves() }, [fetchSaves])
     useEffect(() => { fetchStats() }, [fetchStats])
 
-    // Realtime
+    // Realtime — use as cache invalidation only (do NOT use payload.new directly;
+    // the anon key cannot SELECT after RLS lockdown, so we re-fetch via edge function)
     useEffect(() => {
         if (useMock) return
         const channel = supabase
             .channel('saves-changes')
-            .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'saves' }, (payload) => {
-                if (!userPhone || payload.new.user_phone === userPhone) {
-                    setSaves(prev => [payload.new, ...prev])
-                    fetchStats()
-
-                    // 🔮 Predictive Context Trigger
-                    const isPredicted = payload.new.status === 'predicted' || (payload.new.tags && payload.new.tags.includes('predicted'))
-                    const modeEnabled = localStorage.getItem('predictive_mode') === 'true'
-
-                    if (modeEnabled && !isPredicted) {
-                        // Fire and forget prediction
-                        fetch(`${import.meta.env.VITE_EDGE_FUNCTION_URL}/predictive-analysis`, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ save: payload.new }),
-                        }).then(res => res.json()).then(data => {
-                            if (data.suggestions?.length > 0) {
-                                const inserts = data.suggestions.map(s => ({
-                                    ...s,
-                                    user_phone: payload.new.user_phone,
-                                    status: 'predicted',
-                                    created_at: new Date().toISOString()
-                                }))
-                                supabase.from('saves').insert(inserts).then(({ error }) => {
-                                    if (!error) toast.success(`🔮 Found ${inserts.length} related items!`)
-                                })
-                            }
-                        }).catch(e => console.error('Prediction error:', e))
-                    }
-                }
+            .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'saves' }, () => {
+                fetchSaves()
+                fetchStats()
             })
-            .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'saves' }, (payload) => {
-                if (!userPhone || payload.new.user_phone === userPhone) {
-                    setSaves(prev => prev.map(s => s.id === payload.new.id ? payload.new : s))
-                }
+            .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'saves' }, () => {
+                fetchSaves()
+                fetchStats()
             })
-            .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'saves' }, (payload) => {
-                setSaves(prev => prev.filter(s => s.id !== payload.old.id))
+            .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'saves' }, () => {
+                fetchSaves()
                 fetchStats()
             })
             .subscribe()
 
         return () => { supabase.removeChannel(channel) }
-    }, [userPhone, fetchStats, useMock])
+    }, [userPhone, fetchSaves, fetchStats, useMock])
 
     // Handlers
     const handleDelete = (id) => {
@@ -315,6 +283,8 @@ function App() {
                                             key={id}
                                             onClick={() => setViewMode(id)}
                                             title={title}
+                                            aria-label={title}
+                                            aria-pressed={viewMode === id}
                                             className={cn(
                                                 "flex items-center justify-center rounded-md p-1.5 transition-all",
                                                 viewMode === id

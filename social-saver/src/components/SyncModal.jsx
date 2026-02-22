@@ -34,12 +34,16 @@ export default function SyncModal({ userPhone }) {
 
         try {
             const edgeFnUrl = import.meta.env.VITE_EDGE_FUNCTION_URL || ''
+            const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || ''
 
-            const { createClient } = await import('@supabase/supabase-js')
-            const supabase = createClient(import.meta.env.VITE_SUPABASE_URL, import.meta.env.VITE_SUPABASE_ANON_KEY)
-            const { data: saves } = await supabase.from('saves').select('*').eq('user_phone', userPhone).limit(10)
+            // Fetch saves via edge function (service_role) — not direct anon-key DB access
+            const savesRes = await fetch(
+                `${edgeFnUrl}/get-saves?phone=${encodeURIComponent(userPhone)}&limit=50`,
+                { headers: { Authorization: `Bearer ${anonKey}` } }
+            )
+            const saves = await savesRes.json()
 
-            if (!saves || saves.length === 0) {
+            if (!Array.isArray(saves) || saves.length === 0) {
                 toast.error('No saves to sync.')
                 setSyncing(false)
                 return

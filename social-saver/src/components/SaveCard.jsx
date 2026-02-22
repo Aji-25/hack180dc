@@ -3,6 +3,9 @@ import { ArrowUpRight, Trash2, Share2, Pencil, Check, X, ChevronRight, Sparkles,
 import { marked } from 'marked'
 import { SOURCE_LABELS } from '../lib/constants'
 import { supabase } from '../lib/supabase'
+
+const EDGE_FN_URL = import.meta.env.VITE_EDGE_FUNCTION_URL || ''
+const ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || ''
 import { useToast } from './Toast'
 import { Card, CardContent, CardFooter, CardHeader } from './ui/Card'
 import { Badge } from './ui/Badge'
@@ -52,7 +55,11 @@ function ResearchModal({ dossier, title, onClose }) {
             style={{ backdropFilter: 'blur(12px)', backgroundColor: 'rgba(0,0,0,0.75)' }}
             onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
         >
-            <div className="relative mt-12 mb-12 w-full max-w-2xl mx-4 rounded-2xl border border-white/10 bg-[#0e0e16] shadow-2xl flex flex-col max-h-[85vh]">
+            <div
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="research-modal-title"
+                className="relative mt-12 mb-12 w-full max-w-2xl mx-4 rounded-2xl border border-white/10 bg-[#0e0e16] shadow-2xl flex flex-col max-h-[85vh]">
                 {/* Header */}
                 <div className="flex items-center justify-between px-6 py-4 border-b border-white/10">
                     <div className="flex items-center gap-3">
@@ -61,7 +68,7 @@ function ResearchModal({ dossier, title, onClose }) {
                         </div>
                         <div>
                             <p className="text-[11px] font-bold uppercase tracking-widest text-[var(--color-accent)]">Deep Research</p>
-                            <p className="text-sm font-semibold text-white/90 leading-tight line-clamp-1">{title}</p>
+                            <p id="research-modal-title" className="text-sm font-semibold text-white/90 leading-tight line-clamp-1">{title}</p>
                         </div>
                     </div>
                     <button
@@ -81,7 +88,7 @@ function ResearchModal({ dossier, title, onClose }) {
 
                 {/* Footer */}
                 <div className="px-6 py-3 border-t border-white/5 flex items-center justify-between">
-                    <span className="text-[11px] text-white/30">Powered by Gemini 2.5 Flash</span>
+                    <span className="text-[11px] text-white/30">Powered by gpt-4o-mini</span>
                     <button
                         onClick={onClose}
                         className="text-[12px] font-medium text-white/40 hover:text-white transition-colors"
@@ -113,10 +120,17 @@ export default function SaveCard({ save, onDelete, onUpdate }) {
         setEditing(false)
         if (noteText === (note || '')) return
         try {
-            const { error } = await supabase.from('saves').update({ note: noteText }).eq('id', id)
-            if (!error && onUpdate) {
+            const res = await fetch(`${EDGE_FN_URL}/update-save`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${ANON_KEY}` },
+                body: JSON.stringify({ save_id: id, user_phone: save.user_phone, note: noteText }),
+            })
+            const data = await res.json()
+            if (!data.error && onUpdate) {
                 onUpdate({ ...save, note: noteText })
                 toast.success('Note saved')
+            } else if (data.error) {
+                toast.error('Failed to save note')
             }
         } catch (e) {
             console.error(e)
@@ -127,9 +141,18 @@ export default function SaveCard({ save, onDelete, onUpdate }) {
     const handleDelete = async () => {
         if (!confirm('Are you sure you want to delete this save?')) return
         try {
-            await supabase.from('saves').delete().eq('id', id)
-            if (onDelete) onDelete(id)
-            toast.success('Deleted')
+            const res = await fetch(`${EDGE_FN_URL}/delete-save`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${ANON_KEY}` },
+                body: JSON.stringify({ save_id: id, user_phone: save.user_phone }),
+            })
+            const data = await res.json()
+            if (!data.error) {
+                if (onDelete) onDelete(id)
+                toast.success('Deleted')
+            } else {
+                toast.error('Failed to delete')
+            }
         } catch (e) {
             console.error(e)
             toast.error('Failed to delete')
@@ -236,7 +259,9 @@ export default function SaveCard({ save, onDelete, onUpdate }) {
                     {/* Title / Summary */}
                     <div className="space-y-1">
                         <h3 className="line-clamp-3 text-[15px] font-medium leading-relaxed text-white/90 group-hover:text-white transition-colors">
-                            {summary || title || 'Saved link'}
+                            {category === 'Other' && hostname.includes('instagram.com')
+                                ? 'Instagram Reel/Post - Protected Content'
+                                : (summary || title || 'Saved link')}
                         </h3>
                         <a
                             href={url}
@@ -259,6 +284,34 @@ export default function SaveCard({ save, onDelete, onUpdate }) {
                                     <span className="text-xs leading-relaxed text-white/60">{step}</span>
                                 </div>
                             ))}
+                        </div>
+                    )}
+
+                    {/* AI Predictions */}
+                    {save.predictions && save.predictions.length > 0 && (
+                        <div className="space-y-3 rounded-xl border border-[var(--color-accent)]/20 bg-gradient-to-br from-[var(--color-accent)]/10 to-transparent p-3 shadow-inner">
+                            <div className="flex items-center gap-2 mb-2">
+                                <Sparkles className="h-4 w-4 text-[var(--color-accent)]" />
+                                <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--color-accent)]">AI Suggestions</span>
+                            </div>
+                            <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-none snap-x cursor-grab active:cursor-grabbing">
+                                {save.predictions.map((pred, i) => (
+                                    <a
+                                        key={i}
+                                        href={pred.url}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="snap-start shrink-0 w-48 rounded-lg border border-white/5 bg-[#0e0e1a]/80 p-2.5 hover:border-[var(--color-accent)]/40 hover:bg-[var(--color-accent)]/5 transition-colors group/pred block"
+                                    >
+                                        <div className="flex items-center justify-between mb-1">
+                                            <Badge variant="secondary" className="text-[9px] bg-white/5 text-white/50">{pred.category || 'Related'}</Badge>
+                                            <ArrowUpRight className="h-3.5 w-3.5 opacity-0 group-hover/pred:opacity-50 transition-opacity text-[var(--color-accent)]" />
+                                        </div>
+                                        <h4 className="text-sm font-semibold text-white/80 line-clamp-2 mt-1 mb-1">{pred.title}</h4>
+                                        <p className="text-[11px] text-white/40 line-clamp-2">{pred.summary}</p>
+                                    </a>
+                                ))}
+                            </div>
                         </div>
                     )}
 

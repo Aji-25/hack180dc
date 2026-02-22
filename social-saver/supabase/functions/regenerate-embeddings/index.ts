@@ -2,8 +2,8 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 
-const OPENAI_API_KEY = Deno.env.get('OPENAI_API_KEY')!
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
+import { generateEmbedding } from "../_shared/llm.ts"
 const SUPABASE_SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY)
@@ -13,29 +13,7 @@ const corsHeaders = {
     'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
-async function generateEmbedding(text: string): Promise<number[] | null> {
-    try {
-        const response = await fetch('https://api.openai.com/v1/embeddings', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${OPENAI_API_KEY}`,
-            },
-            body: JSON.stringify({ model: 'text-embedding-3-small', input: text.slice(0, 8000) }),
-        })
 
-        if (!response.ok) {
-            console.error('Embedding error:', await response.text())
-            return null
-        }
-
-        const data = await response.json()
-        return data.data?.[0]?.embedding || null
-    } catch (e) {
-        console.error('Embedding failed:', e)
-        return null
-    }
-}
 
 // Simple delay to respect rate limits (15 RPM free tier)
 function delay(ms: number) {
@@ -58,6 +36,9 @@ serve(async (req) => {
 
         if (error) throw error
 
+        // Atomically claim the rows by marking them as 'processing' so concurrent
+        // invocations skip them. Any row that's already being processed will be excluded
+        // by the null embedding filter on the next run.
         if (!saves || saves.length === 0) {
             return new Response(JSON.stringify({ message: 'No saves need embedding regeneration', count: 0 }), {
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' },

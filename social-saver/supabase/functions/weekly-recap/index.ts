@@ -1,6 +1,7 @@
 // @ts-nocheck
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { callOpenAI } from "../_shared/llm.ts";
 
 const corsHeaders = {
     "Access-Control-Allow-Origin": "*",
@@ -32,6 +33,7 @@ serve(async (req: Request) => {
             .from("saves")
             .select("category, tags, summary, source, note, created_at")
             .eq("user_phone", phone)
+            .eq("is_deleted", false)
             .gte("created_at", weekAgo)
             .order("created_at", { ascending: false });
 
@@ -76,28 +78,12 @@ serve(async (req: Request) => {
             .slice(0, 15)
             .join("; ");
 
-        // One LLM call using OpenAI
-        const llmRes = await fetch('https://api.openai.com/v1/chat/completions', {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                "Authorization": `Bearer ${Deno.env.get("OPENAI_API_KEY")}`,
-            },
-            body: JSON.stringify({
-                model: 'gpt-4o-mini',
-                messages: [{ role: 'user', content: `You generate weekly recap summaries for a link-saving app. Be conversational, warm, and specific. Return JSON: { "bullets": ["...", "...", "...", "...", "..."] } — exactly 5 bullets.\n\nUser saved ${saves.length} links this week.\nCategories: ${catSummary}.\nTop tags: ${topTags.join(", ")}.\nSample summaries: ${summaries}.\n\nGenerate a 5-bullet weekly recap:\n1) A summary line like "You saved X links: Y Fitness, Z Food…"\n2) Top themes you noticed across the saves\n3) An interesting pattern or insight\n4) A suggestion for what to explore next\n5) A motivational or fun closing line` }],
-                temperature: 0.7,
-                max_tokens: 500,
-                response_format: { type: 'json_object' },
-            })
-        });
-
-        const llmData = await llmRes.json();
         let bullets: string[] = [];
 
         try {
-            const text = llmData.choices?.[0]?.message?.content || "{}";
-            const parsed = JSON.parse(text);
+            const prompt = `You generate weekly recap summaries for a link-saving app. Be conversational, warm, and specific. Return JSON: { "bullets": ["...", "...", "...", "...", "..."] } — exactly 5 bullets.\n\nUser saved ${saves.length} links this week.\nCategories: ${catSummary}.\nTop tags: ${topTags.join(", ")}.\nSample summaries: ${summaries}.\n\nGenerate a 5-bullet weekly recap:\n1) A summary line like "You saved X links: Y Fitness, Z Food…"\n2) Top themes you noticed across the saves\n3) An interesting pattern or insight\n4) A suggestion for what to explore next\n5) A motivational or fun closing line`;
+            const text = await callOpenAI(prompt, { temperature: 0.7, maxTokens: 500, jsonMode: true });
+            const parsed = JSON.parse(text || "{}");
             bullets = parsed.bullets || [];
         } catch {
             bullets = [

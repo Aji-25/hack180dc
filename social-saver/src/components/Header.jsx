@@ -1,6 +1,5 @@
-import { Bookmark, TrendingUp, Calendar, Zap, Sparkles } from 'lucide-react'
+import { Bookmark, TrendingUp, Calendar, Sparkles } from 'lucide-react'
 import SyncModal from './SyncModal'
-import { Button } from './ui/Button'
 import { Badge } from './ui/Badge'
 
 export default function Header({ totalSaves, stats, userPhone, onLogoClick }) {
@@ -17,6 +16,7 @@ export default function Header({ totalSaves, stats, userPhone, onLogoClick }) {
                 <div className="flex items-center gap-6">
                     {/* Logo */}
                     <button
+                        type="button"
                         onClick={onLogoClick}
                         className="group flex items-center gap-3 transition-opacity hover:opacity-80"
                         title="Back to landing page"

@@ -14,6 +14,7 @@ export default function CategoryChips({ selected, onSelect, counts }) {
                     <button
                         key={cat}
                         onClick={() => onSelect(cat)}
+                        aria-pressed={isActive}
                         className={cn(
                             "group inline-flex h-7 shrink-0 items-center gap-2 rounded-lg border px-3 text-xs font-medium transition-all",
                             isActive

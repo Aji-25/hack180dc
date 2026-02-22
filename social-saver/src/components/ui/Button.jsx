@@ -26,8 +26,9 @@ export const Button = React.forwardRef(({
 
     return (
         <button
+            type="button"
             ref={ref}
-            className={twMerge(baseStyles, variants[variant], sizes[size], className)}
+            className={twMerge(baseStyles, variants[variant] ?? variants.primary, sizes[size] ?? sizes.md, className)}
             {...props}
         >
             {children}

@@ -27,7 +27,7 @@ export function ToastProvider({ children }) {
     const icons = {
         success: <Check className="w-3.5 h-3.5 text-green shrink-0" />,
         error: <AlertCircle className="w-3.5 h-3.5 text-red shrink-0" />,
-        info: <Info className="w-3.5 h-3.5 shrink-0" style={{ color: '#7c6dfa' }} />,
+        info: <Info className="w-3.5 h-3.5 shrink-0 text-[var(--color-accent)]" />,
     }
 
     return (

@@ -58,14 +58,13 @@ serve(async (req) => {
 
             if (!twilioRes.ok) {
                 const errText = await twilioRes.text()
-                console.error('Twilio Error:', errText)
-
-                // Return a specific error response instead of throwing 500
+                // Log full Twilio error server-side only — never expose to client
+                console.error('[send-reminders] Twilio error:', errText)
                 return new Response(JSON.stringify({
                     success: false,
-                    error: `Twilio send failed. Check Twilio logs. Detail: ${errText.slice(0, 100)}...`
+                    error: 'Failed to send reminder. Please try again later.'
                 }), {
-                    status: 400,
+                    status: 502,
                     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
                 })
             }

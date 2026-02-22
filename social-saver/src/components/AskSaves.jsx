@@ -18,6 +18,7 @@ export default function AskSaves({ saves, userPhone }) {
     const [citations, setCitations] = useState(null)
     const [retrieval, setRetrieval] = useState(null)
     const [showDebug, setShowDebug] = useState(false)
+    const [isCached, setIsCached] = useState(false)
     const inputRef = useRef(null)
 
     const edgeFnUrl = import.meta.env.VITE_EDGE_FUNCTION_URL || ''
@@ -31,6 +32,7 @@ export default function AskSaves({ saves, userPhone }) {
         setCitations(null)
         setRetrieval(null)
         setShowDebug(false)
+        setIsCached(false)
 
         // Client-side fallback when no edge function URL configured
         if (!edgeFnUrl) {
@@ -63,6 +65,7 @@ export default function AskSaves({ saves, userPhone }) {
             if (data.error) throw new Error(data.error)
 
             setAiReply(data.reply || 'No response generated.')
+            setIsCached(!!data.cached)
 
             // Prefer new citations shape, fall back to legacy references
             const cits = data.citations?.length
@@ -78,7 +81,7 @@ export default function AskSaves({ saves, userPhone }) {
     }
 
     const clearAll = () => {
-        setQuery(''); setAiReply(null); setCitations(null); setRetrieval(null)
+        setQuery(''); setAiReply(null); setCitations(null); setRetrieval(null); setIsCached(false)
     }
 
     return (
@@ -117,6 +120,15 @@ export default function AskSaves({ saves, userPhone }) {
                     <Network className="h-3 w-3 text-purple-400" />
                     <span className="text-[11px] font-medium text-purple-400/80">
                         Graph-RAG active · {retrieval.graph_entities_matched?.length || 0} entities matched
+                    </span>
+                </div>
+            )}
+
+            {/* Cached response badge */}
+            {isCached && (
+                <div className="mt-2 flex items-center justify-center">
+                    <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-3 py-1 text-[11px] font-semibold text-emerald-400 border border-emerald-500/20">
+                        ⚡ Cached response — instant retrieval
                     </span>
                 </div>
             )}

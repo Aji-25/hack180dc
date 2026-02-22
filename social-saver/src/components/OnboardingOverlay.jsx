@@ -38,6 +38,14 @@ export default function OnboardingOverlay() {
         localStorage.setItem('social-saver-onboarded', 'true')
     }
 
+    // Close on Escape key
+    useEffect(() => {
+        if (!visible) return
+        const handler = (e) => { if (e.key === 'Escape') dismiss() }
+        document.addEventListener('keydown', handler)
+        return () => document.removeEventListener('keydown', handler)
+    }, [visible])
+
     if (!visible) return null
 
     return (
@@ -57,6 +65,9 @@ export default function OnboardingOverlay() {
                         animate={{ opacity: 1, scale: 1, y: 0 }}
                         exit={{ opacity: 0, scale: 0.95, y: 10 }}
                         transition={{ duration: 0.3 }}
+                        role="dialog"
+                        aria-modal="true"
+                        aria-labelledby="onboarding-title"
                         className="relative w-full max-w-md overflow-hidden rounded-2xl border border-white/10 bg-[var(--color-bg-raised)] shadow-2xl shadow-[var(--color-accent)]/10"
                         onClick={e => e.stopPropagation()}
                     >
@@ -67,6 +78,7 @@ export default function OnboardingOverlay() {
                         {/* Close Button */}
                         <button
                             onClick={dismiss}
+                            aria-label="Close"
                             className="absolute top-4 right-4 p-2 rounded-full hover:bg-white/5 text-white/40 hover:text-white transition-colors z-20"
                         >
                             <X className="w-4 h-4" />
@@ -78,7 +90,7 @@ export default function OnboardingOverlay() {
                                 <div className="inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-gradient-to-br from-[var(--color-accent)] to-[var(--color-accent-2)] shadow-lg shadow-[var(--color-accent)]/20 mb-4">
                                     <Bookmark className="w-6 h-6 text-white" strokeWidth={2.5} />
                                 </div>
-                                <h2 className="text-xl font-bold text-white mb-2">Welcome to Social Saver</h2>
+                                <h2 id="onboarding-title" className="text-xl font-bold text-white mb-2">Welcome to Social Saver</h2>
                                 <p className="text-sm text-white/60">
                                     Your AI-powered bookmark manager via WhatsApp
                                 </p>

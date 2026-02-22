@@ -11,10 +11,28 @@ import { checkRateLimit } from "../_shared/rateLimit.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY")!;
+const APP_URL = Deno.env.get("APP_URL") || "https://social-saver.vercel.app";
+
+import twilio from "npm:twilio";
+import { callOpenAI, generateEmbedding, transcribeAudio, describeImage } from "../_shared/llm.ts";
 const APP_URL = Deno.env.get("APP_URL") || "https://social-saver.vercel.app";
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
+
+// ── Phone Hashing (SHA-256) ──────────────────────────────────────────────────────────
+// Converts raw Twilio phone (e.g. "whatsapp:+919876543210") to a
+// 64-char hex SHA-256 hash before persisting to the DB.
+// This prevents PII leakage in database exports or logs.
+// The dashboard URL sends the hash back to the user, so they can
+// bookmark their unique (non-guessable) library URL.
+async function hashPhone(phone: string): Promise<string> {
+    const normalized = phone.toLowerCase().trim();
+    const encoder = new TextEncoder();
+    const data = encoder.encode(normalized);
+    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+}
 
 
 
@@ -149,130 +167,7 @@ async function fetchContent(url: string): Promise<string | null> {
     }
 }
 
-// ── OpenAI API Helpers ──────────────────────────────────
-
-async function callOpenAI(prompt: string, options: { temperature?: number; maxTokens?: number; jsonMode?: boolean } = {}): Promise<string> {
-    const { temperature = 0.3, maxTokens = 500, jsonMode = false } = options;
-
-    const body: any = {
-        model: 'gpt-4o-mini',
-        messages: [{ role: 'user', content: prompt }],
-        temperature,
-        max_tokens: maxTokens,
-    };
-
-    if (jsonMode) body.response_format = { type: 'json_object' };
-
-    let lastError: any;
-    for (let attempt = 1; attempt <= 3; attempt++) {
-        try {
-            const res = await fetch('https://api.openai.com/v1/chat/completions', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${OPENAI_API_KEY}`,
-                },
-                body: JSON.stringify(body),
-            });
-
-            if (!res.ok) {
-                const text = await res.text();
-                console.error(`OpenAI error (Attempt ${attempt}):`, res.status, text);
-                if (res.status === 429) {
-                    await new Promise(r => setTimeout(r, attempt * 1500));
-                    lastError = new Error(`OpenAI API 429: ${text}`);
-                    continue;
-                }
-                throw new Error(`OpenAI API error: ${res.status}`);
-            }
-
-            const data = await res.json();
-            return data.choices?.[0]?.message?.content || '';
-        } catch (error) {
-            lastError = error;
-            if (error.message?.includes('429')) {
-                await new Promise(r => setTimeout(r, attempt * 1500));
-                continue;
-            }
-            throw error;
-        }
-    }
-    throw lastError;
-}
-
-async function generateEmbedding(text: string): Promise<number[] | null> {
-    try {
-        const response = await fetch('https://api.openai.com/v1/embeddings', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${OPENAI_API_KEY}`,
-            },
-            body: JSON.stringify({
-                model: 'text-embedding-3-small',
-                input: text.slice(0, 8000),
-            }),
-        });
-
-        if (!response.ok) {
-            console.error('OpenAI Embedding Error:', await response.text());
-            return null;
-        }
-
-        const data = await response.json();
-        return data.data?.[0]?.embedding || null;
-    } catch (e) {
-        console.error('Embedding generation failed:', e);
-        return null;
-    }
-}
-
-// ── Whisper Audio Transcription ─────────────────────────
-
-async function transcribeAudio(mediaUrl: string): Promise<string> {
-    try {
-        // Fetch audio from Twilio URL (requires auth)
-        const TWILIO_ACCOUNT_SID = Deno.env.get('TWILIO_ACCOUNT_SID')!;
-        const TWILIO_AUTH_TOKEN = Deno.env.get('TWILIO_AUTH_TOKEN')!;
-        const audioRes = await fetch(mediaUrl, {
-            headers: {
-                'Authorization': `Basic ${btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`)}`,
-            },
-        });
-
-        if (!audioRes.ok) {
-            console.error('[whisper] Failed to download audio:', audioRes.status);
-            return '';
-        }
-
-        const audioBuffer = await audioRes.arrayBuffer();
-        const contentType = audioRes.headers.get('content-type') || 'audio/ogg';
-        const ext = contentType.includes('mp4') ? 'mp4' : contentType.includes('ogg') ? 'ogg' : 'mp3';
-
-        // Build multipart form for Whisper
-        const formData = new FormData();
-        formData.append('file', new Blob([audioBuffer], { type: contentType }), `audio.${ext}`);
-        formData.append('model', 'whisper-1');
-        formData.append('language', 'en');
-
-        const whisperRes = await fetch('https://api.openai.com/v1/audio/transcriptions', {
-            method: 'POST',
-            headers: { 'Authorization': `Bearer ${OPENAI_API_KEY}` },
-            body: formData,
-        });
-
-        if (!whisperRes.ok) {
-            console.error('[whisper] Error:', await whisperRes.text());
-            return '';
-        }
-
-        const result = await whisperRes.json();
-        return result.text || '';
-    } catch (err) {
-        console.error('[whisper] Transcription failed:', err);
-        return '';
-    }
-}
+// ── LLM Functions abstracted to _shared/llm.ts ──────────
 
 // ── Smart URL-based fallback (no LLM needed) ───────────
 
@@ -422,53 +317,7 @@ User note: ${userNote || "(none)"}`;
 
 
 
-// ── Image → GPT-4o Vision description ────────────────────────────
-
-async function describeImage(mediaUrl: string): Promise<{ title: string; description: string }> {
-    try {
-        // Download image and convert to base64
-        const imageRes = await fetch(mediaUrl);
-        const imageBuffer = await imageRes.arrayBuffer();
-        const base64Image = btoa(String.fromCharCode(...new Uint8Array(imageBuffer)));
-        const mimeType = imageRes.headers.get('content-type') || 'image/jpeg';
-
-        const res = await fetch('https://api.openai.com/v1/chat/completions', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${OPENAI_API_KEY}`,
-            },
-            body: JSON.stringify({
-                model: 'gpt-4o-mini',
-                max_tokens: 200,
-                messages: [{
-                    role: 'user',
-                    content: [
-                        { type: 'image_url', image_url: { url: `data:${mimeType};base64,${base64Image}` } },
-                        { type: 'text', text: 'Describe this image concisely. Return ONLY JSON: { "title": "short title max 8 words", "description": "max 30 words" }' },
-                    ],
-                }],
-                response_format: { type: 'json_object' },
-            }),
-        });
-
-        if (!res.ok) {
-            console.error("GPT Vision error:", res.status);
-            return { title: "Image save", description: "" };
-        }
-
-        const data = await res.json();
-        const text = data.choices?.[0]?.message?.content || "{}";
-        const parsed = JSON.parse(text);
-        return {
-            title: parsed.title || "Image save",
-            description: parsed.description || "",
-        };
-    } catch (err) {
-        console.error("Vision error:", err);
-        return { title: "Image save", description: "" };
-    }
-}
+// ── Vision abstracted to _shared/llm.ts ──────────
 
 function twimlResponse(message: string): Response {
     const safeMsg = message
@@ -508,6 +357,34 @@ Deno.serve(async (req) => {
 
     try {
         const formData = await req.formData();
+
+        // ── Twilio Signature Validation ──
+        const twilioSignature = req.headers.get("X-Twilio-Signature") || "";
+        const twilioAuthToken = Deno.env.get("TWILIO_AUTH_TOKEN") || "";
+        const twilioParams: Record<string, string> = {};
+        for (const [key, val] of formData.entries()) {
+            twilioParams[key] = val.toString();
+        }
+
+        // Use external URL for validation because Supabase passes the internal edge fn URL in req.url
+        // E.g. https://<project.supabase.co>/functions/v1/whatsapp-webhook
+        const urlToValidate = req.headers.get("x-forwarded-host")
+            ? `https://${req.headers.get("x-forwarded-host")}/functions/v1/whatsapp-webhook`
+            : req.url;
+
+        const isValid = twilio.validateRequest(
+            twilioAuthToken,
+            twilioSignature,
+            urlToValidate,
+            twilioParams
+        );
+
+        if (!isValid && Deno.env.get("TWILIO_SKIP_VALIDATION") !== "true") {
+            console.error("Invalid Twilio signature — rejecting request.");
+            return new Response("Unauthorized", { status: 403 });
+        }
+        // ────────────────────────────
+
         const body = (formData.get("Body") as string) || "";
         const from = (formData.get("From") as string) || "";
         const numMedia = parseInt((formData.get("NumMedia") as string) || "0");
@@ -519,6 +396,9 @@ Deno.serve(async (req) => {
         if (!from) {
             return twimlResponse("Could not identify sender. Please try again.");
         }
+
+        // Hash the phone number for all DB operations
+        const userPhone = await hashPhone(from);
 
         // ── Voice Note (Whisper) ──────────────────────────────
         if (numMedia > 0 && mediaType.startsWith("audio/")) {
@@ -535,7 +415,7 @@ Deno.serve(async (req) => {
             const classification = await classifyWithLLM("", "voice", "Voice Note", transcript, body, from);
 
             const { data: voiceSave } = await supabase.from("saves").insert({
-                user_phone: from,
+                user_phone: userPhone,
                 url: `voice://${Date.now()}`,
                 source: "voice",
                 title: "🎙️ Voice Note",
@@ -548,9 +428,13 @@ Deno.serve(async (req) => {
                 status: "complete",
             }).select().single();
 
+            // Non-blocking embedding — don't delay the WhatsApp reply
             if (voiceSave?.id) {
-                const embedding = await generateEmbedding(`${transcript} ${classification.summary}`);
-                if (embedding) await supabase.from('saves').update({ embedding }).eq('id', voiceSave.id);
+                generateEmbedding(`${transcript} ${classification.summary}`)
+                    .then(embedding => {
+                        if (embedding) supabase.from('saves').update({ embedding }).eq('id', voiceSave.id)
+                    })
+                    .catch(err => console.warn('[webhook] voice embedding failed:', err.message))
             }
 
             const emoji = CATEGORY_EMOJIS[classification.category] || "📌";
@@ -558,7 +442,7 @@ Deno.serve(async (req) => {
                 `🎙️ Voice note saved! ${emoji} ${classification.category}\n` +
                 `📝 ${classification.summary}\n\n` +
                 `💬 "${transcript.slice(0, 100)}${transcript.length > 100 ? '...' : ''}"\n\n` +
-                `🔗 Dashboard: ${APP_URL}/?u=${encodeURIComponent(from)}`
+                `🔗 Dashboard: ${APP_URL}/?u=${encodeURIComponent(userPhone)}`
             );
         }
 
@@ -575,7 +459,7 @@ Deno.serve(async (req) => {
             );
 
             await supabase.from("saves").insert({
-                user_phone: from,
+                user_phone: userPhone,
                 url: mediaUrl,
                 source: "image",
                 title: imageInfo.title,
@@ -592,7 +476,7 @@ Deno.serve(async (req) => {
             return twimlResponse(
                 `📸 Image saved! ${emoji} ${classification.category}\n` +
                 `📝 ${classification.summary}\n\n` +
-                `🔗 Dashboard: ${APP_URL}/?u=${encodeURIComponent(from)}`
+                `🔗 Dashboard: ${APP_URL}/?u=${encodeURIComponent(userPhone)}`
             );
         }
 
@@ -607,7 +491,7 @@ Deno.serve(async (req) => {
             const { data: pending } = await supabase
                 .from("saves")
                 .select("*")
-                .eq("user_phone", from)
+                .eq("user_phone", userPhone)
                 .eq("status", "pending_note")
                 .order("created_at", { ascending: false })
                 .limit(1);
@@ -642,13 +526,13 @@ Deno.serve(async (req) => {
                     `Note added & re-categorized! ${emoji}\n` +
                     `📂 ${result.category}\n` +
                     `📝 ${result.summary}\n\n` +
-                    `🔗 Dashboard: ${APP_URL}/?u=${encodeURIComponent(from)}`
+                    `🔗 Dashboard: ${APP_URL}/?u=${encodeURIComponent(userPhone)}`
                 );
             }
 
             return twimlResponse(
                 "👋 Hey! Send me an Instagram (or any) link and I'll save it to your dashboard.\n\n" +
-                `🔗 Your dashboard: ${APP_URL}/?u=${encodeURIComponent(from)}`
+                `🔗 Your dashboard: ${APP_URL}/?u=${encodeURIComponent(userPhone)}`
             );
         }
 
@@ -678,7 +562,7 @@ Deno.serve(async (req) => {
                     .from("saves")
                     .upsert(
                         {
-                            user_phone: from,
+                            user_phone: userPhone,
                             url,
                             source,
                             title: metadata.title || null,
@@ -709,11 +593,19 @@ Deno.serve(async (req) => {
                     // Queue this save for Neo4j graph indexing (async — does not block reply)
                     supabase.from('graph_jobs').insert({
                         save_id: data.id,
-                        user_phone: from,
+                        user_phone: userPhone,
                         status: 'pending',
                     }).then(({ error: jobErr }) => {
                         if (jobErr) console.warn('[webhook] graph_jobs insert failed:', jobErr.message)
                     })
+
+                    // Fire and forget predictive analysis
+                    const EDGE_FUNCTION_URL = Deno.env.get("EDGE_FUNCTION_URL") || "http://127.0.0.1:54321/functions/v1"
+                    fetch(`${EDGE_FUNCTION_URL}/predictive-analysis`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ save: data }),
+                    }).catch(e => console.error('[webhook] predictive-analysis trigger failed:', e))
                 }
 
                 const emoji = CATEGORY_EMOJIS[classification.category] || "📌";
@@ -733,7 +625,7 @@ Deno.serve(async (req) => {
                 try {
                     await supabase.from("saves").upsert(
                         {
-                            user_phone: from,
+                            user_phone: userPhone,
                             url,
                             source: detectSource(url),
                             category: "Other",
@@ -751,7 +643,7 @@ Deno.serve(async (req) => {
         }
 
         const reply = results.join("\n\n") +
-            `\n\n🔗 Dashboard: ${APP_URL}/?u=${encodeURIComponent(from)}`;
+            `\n\n🔗 Dashboard: ${APP_URL}/?u=${encodeURIComponent(userPhone)}`;
 
         return twimlResponse(reply);
     } catch (err) {

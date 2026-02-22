@@ -10,10 +10,45 @@ import {
 } from '../_shared/neo4j.ts'
 import { checkRateLimit } from '../_shared/rateLimit.ts'
 
-const OPENAI_API_KEY = Deno.env.get('OPENAI_API_KEY')!
-const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
-const SUPABASE_SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+const SUPABASE_URL = Deno.env.get('SUPABASE_URL')
+import { callOpenAI, generateEmbedding } from '../_shared/llm.ts'
+const SUPABASE_SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
+
+if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
+    throw new Error('[chat-brain] Missing required env vars: SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY')
+}
+
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY)
+
+// ── In-Memory LRU Cache ──────────────────────────────────────────────────────
+// Survives warm Deno isolate invocations. Cold starts start fresh (expected).
+// Caches exact query+phone combos to avoid burning OpenAI tokens on repeats.
+
+const CACHE_MAX = 50
+const CACHE_TTL_MS = 5 * 60 * 1000 // 5 minutes
+
+interface CacheEntry { data: unknown; ts: number }
+const _queryCache = new Map<string, CacheEntry>()
+
+function _cacheKey(query: string, phone: string): string {
+    return `${phone}:${query.trim().toLowerCase()}`
+}
+
+function _getCache(key: string): unknown | null {
+    const entry = _queryCache.get(key)
+    if (!entry) return null
+    if (Date.now() - entry.ts > CACHE_TTL_MS) { _queryCache.delete(key); return null }
+    return entry.data
+}
+
+function _setCache(key: string, data: unknown): void {
+    if (_queryCache.size >= CACHE_MAX) {
+        // Evict the oldest entry
+        const oldest = [..._queryCache.entries()].sort((a, b) => a[1].ts - b[1].ts)[0]
+        if (oldest) _queryCache.delete(oldest[0])
+    }
+    _queryCache.set(key, { data, ts: Date.now() })
+}
 
 const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
@@ -22,21 +57,7 @@ const corsHeaders = {
 
 // ── Rate limiting: 15 queries per phone per day using shared module ──────────
 
-// ── Gemini helpers ───────────────────────────────────────────────────────────
-// Generate embedding using OpenAI text-embedding-3-small (1536 dims)
-async function generateEmbedding(text: string): Promise<number[]> {
-    const res = await fetch('https://api.openai.com/v1/embeddings', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${OPENAI_API_KEY}`,
-        },
-        body: JSON.stringify({ model: 'text-embedding-3-small', input: text.slice(0, 8000) }),
-    })
-    if (!res.ok) throw new Error(`Embedding error: ${res.statusText}`)
-    const data = await res.json()
-    return data.data[0].embedding
-}
+
 
 // Query entity + intent extraction
 const QUERY_EXTRACT_PROMPT = (query: string) => `Extract entities and intent from this search query for a personal knowledge base.
@@ -69,21 +90,8 @@ async function extractQueryEntities(query: string): Promise<{
     filters: { category: string | null; source: string | null };
 }> {
     try {
-        const res = await fetch('https://api.openai.com/v1/chat/completions', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${OPENAI_API_KEY}` },
-            body: JSON.stringify({
-                model: 'gpt-4o-mini',
-                messages: [{ role: 'user', content: QUERY_EXTRACT_PROMPT(query) }],
-                temperature: 0.1,
-                max_tokens: 512,
-                response_format: { type: 'json_object' },
-            }),
-        })
-        if (!res.ok) throw new Error('extraction failed')
-        const data = await res.json()
-        const text = data.choices?.[0]?.message?.content || '{}'
-        const parsed = JSON.parse(text)
+        const text = await callOpenAI(QUERY_EXTRACT_PROMPT(query), { temperature: 0.1, maxTokens: 512, jsonMode: true })
+        const parsed = JSON.parse(text || '{}')
         return {
             entities: (parsed.query_entities || []).slice(0, 5),
             intent: parsed.intent || 'find',
@@ -190,7 +198,7 @@ async function graphRetrieval(
         }
     }
 
-    return { saves, entityKeys: matchedKeys, matchedEntityNames: matchedNames }
+    return { saves, entityKeys: matchedKeys, matchedEntityNames: matchedNames, hopsRan: hopRows.length > 0 }
 }
 
 // ── Answer generation ────────────────────────────────────────────────────────
@@ -226,19 +234,12 @@ ${contextText}
 
 Answer:`
 
-    const res = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${OPENAI_API_KEY}` },
-        body: JSON.stringify({
-            model: 'gpt-4o-mini',
-            messages: [{ role: 'user', content: prompt }],
-            temperature: 0.7,
-            max_tokens: 1024,
-        }),
-    })
-    if (!res.ok) throw new Error(`OpenAI answer error: ${res.statusText}`)
-    const data = await res.json()
-    return data.choices?.[0]?.message?.content || 'No response generated.'
+    try {
+        const text = await callOpenAI(prompt, { temperature: 0.7, maxTokens: 1024, jsonMode: false })
+        return text || 'No response generated.'
+    } catch (e) {
+        throw new Error(`OpenAI answer error: ${e.message}`)
+    }
 }
 
 // ── Handler ──────────────────────────────────────────────────────────────────
@@ -250,8 +251,17 @@ serve(async (req) => {
         const { query, user_phone } = body
         if (!query) throw new Error('query required')
 
-        // Rate limit: 15 queries per phone per day
+        // ── Cache check: return immediately on exact match ──
         const identifier = user_phone || req.headers.get('x-forwarded-for') || 'anonymous'
+        const cacheKey = _cacheKey(query, identifier)
+        const cached = _getCache(cacheKey)
+        if (cached) {
+            console.log(`[chat-brain] Cache hit for key: ${cacheKey.slice(0, 40)}…`)
+            return new Response(JSON.stringify({ ...(cached as object), cached: true }), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            })
+        }
+        // Rate limit: 15 queries per phone per day
         const rl = await checkRateLimit(identifier, 'chat-brain')
         if (!rl.allowed) {
             return new Response(JSON.stringify({ error: `Daily AI search limit reached (${rl.limit}/day). Try again tomorrow!` }), {
@@ -272,6 +282,7 @@ serve(async (req) => {
             query_embedding: queryEmbedding,
             match_threshold: 0.45,
             match_count: 8,
+            filter: { is_deleted: false }
         })
         if (vecErr) console.error('[chat-brain] vector search error:', vecErr)
 
@@ -281,7 +292,7 @@ serve(async (req) => {
 
         // 3. Graph retrieval (if Neo4j configured + phone provided)
         const phone = user_phone || clientIP
-        const { saves: graphSaves, entityKeys, matchedEntityNames } =
+        const { saves: graphSaves, entityKeys, matchedEntityNames, hopsRan } =
             await graphRetrieval(phone, queryEntities, require_all, 8)
 
         // 4. Merge + deduplicate
@@ -329,7 +340,7 @@ serve(async (req) => {
             similarity: s.similarity ? Math.round(s.similarity * 100) / 100 : null,
         }))
 
-        return new Response(JSON.stringify({
+        const responsePayload = {
             reply,
             citations,
             // Legacy field for backward compat
@@ -341,12 +352,17 @@ serve(async (req) => {
                 graph_save_ids: graphSaves.map(s => s.id),
                 vector_save_ids: vectorResults.map(s => s.id),
                 merged_ids: finalSaves.map(s => s.id),
-                hops: 2,
+                hops: hopsRan ? 2 : 1,
                 intent,
                 require_all,
                 neo4j_active: isNeo4jConfigured(),
             },
-        }), {
+        }
+
+        // Store in cache for future identical queries
+        _setCache(cacheKey, responsePayload)
+
+        return new Response(JSON.stringify(responsePayload), {
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         })
 

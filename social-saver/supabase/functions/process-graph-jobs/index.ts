@@ -22,6 +22,29 @@ const corsHeaders = {
 }
 
 const MAX_ATTEMPTS = 3
+
+// After MAX_ATTEMPTS failures, move the job to the dead-letter table
+async function moveToDeadLetter(
+    supabase: any,
+    job: { id: string; save_id: string; user_phone: string; attempts: number },
+    errorMessage: string
+): Promise<void> {
+    await Promise.all([
+        supabase.from('failed_graph_jobs').insert({
+            original_job_id: job.id,
+            save_id: job.save_id,
+            user_phone: job.user_phone,
+            attempts: job.attempts + 1,
+            last_error: errorMessage,
+        }),
+        supabase.from('graph_jobs').update({
+            status: 'dead',
+            last_error: errorMessage,
+            updated_at: new Date().toISOString(),
+        }).eq('id', job.id),
+    ])
+    console.warn(`[process-jobs] Job ${job.id} moved to dead-letter queue after ${job.attempts + 1} attempts.`)
+}
 const DEFAULT_BATCH_SIZE = 10
 
 serve(async (req) => {
@@ -93,13 +116,19 @@ serve(async (req) => {
             results.push({ job_id: job.id, save_id: job.save_id, entity_count: data.entity_count })
 
         } catch (err) {
-            console.error(`[process-jobs] Job ${job.id} failed:`, err.message)
+            console.error(`[process-jobs] Job ${job.id} failed (attempt ${job.attempts + 1}/${MAX_ATTEMPTS}):`, err.message)
 
-            await supabase.from('graph_jobs').update({
-                status: 'error',
-                last_error: err.message,
-                updated_at: new Date().toISOString(),
-            }).eq('id', job.id)
+            if (job.attempts + 1 >= MAX_ATTEMPTS) {
+                // Exhausted all retries — move to dead-letter queue
+                await moveToDeadLetter(supabase, job, err.message)
+            } else {
+                // Still has retries remaining — mark as error for future pickup
+                await supabase.from('graph_jobs').update({
+                    status: 'error',
+                    last_error: err.message,
+                    updated_at: new Date().toISOString(),
+                }).eq('id', job.id)
+            }
 
             errors++
         }

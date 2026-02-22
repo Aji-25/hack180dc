@@ -88,8 +88,10 @@ serve(async (req) => {
         const catRows = await runCypher(`
             MATCH (u:User {phone: $phone})-[:SAVED]->(s:Save)-[:IN_CATEGORY]->(cat:Category)
             WITH cat, count(s) AS freq
+            ORDER BY freq DESC
+            LIMIT $limit
             RETURN 'cat::' + cat.name AS id, cat.name AS label, 'category' AS type, freq AS size
-        `, { phone: user_phone })
+        `, { phone: user_phone, limit: neo4j.int(limitNodes) })
 
         const catNodes = catRows.map(r => ({
             id: r.id, label: r.label, type: r.type, size: r.size

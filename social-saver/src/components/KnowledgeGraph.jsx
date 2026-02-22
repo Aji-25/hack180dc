@@ -7,7 +7,6 @@ import { cn } from '../lib/utils'
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL
 const ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY
-const DEMO_KEY = import.meta.env.VITE_DEMO_KEY || ''
 const EDGE_BASE = `${SUPABASE_URL}/functions/v1`
 
 /* ── Colors ────────────────────────────────────────────────────────────────── */
@@ -59,17 +58,6 @@ async function fetchRelatedSaves(userPhone, entityKey, entityName, hops = 2) {
     return res.json()
 }
 
-async function triggerRebuild(userPhone, batchSize = 20) {
-    const headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${ANON_KEY}` }
-    if (DEMO_KEY) headers['X-DEMO-KEY'] = DEMO_KEY
-
-    const res = await fetch(`${EDGE_BASE}/process-graph-jobs`, {
-        method: 'POST', headers,
-        body: JSON.stringify({ batch_size: batchSize }),
-    })
-    if (!res.ok) throw new Error(`process-graph-jobs: ${res.status}`)
-    return res.json()
-}
 
 /* ── Main Component ─────────────────────────────────────────────────────────── */
 export default function KnowledgeGraph({ saves, userPhone }) {
@@ -129,6 +117,7 @@ export default function KnowledgeGraph({ saves, userPhone }) {
             })
             .catch(err => {
                 console.warn('[KnowledgeGraph] Neo4j not ready, using local data:', err.message)
+                setLoadError(err.message)
                 setUsingLiveData(false)
                 setLoading(false)
             })
@@ -229,20 +218,7 @@ export default function KnowledgeGraph({ saves, userPhone }) {
             .catch(err => { setDrawerError(err.message); setDrawerLoading(false) })
     }, [usingLiveData, userPhone])
 
-    // Admin: rebuild graph
-    const handleRebuild = async () => {
-        setRebuilding(true); setRebuildResult(null)
-        try {
-            const data = await triggerRebuild(userPhone, 20)
-            setRebuildResult(data)
-        } catch (err) {
-            setRebuildResult({ error: err.message })
-        } finally {
-            setRebuilding(false)
-        }
-    }
 
-    // Zoom
     const zoomIn = () => graphRef.current?.zoom(graphRef.current.zoom() * 1.4, 300)
     const zoomOut = () => graphRef.current?.zoom(graphRef.current.zoom() * 0.7, 300)
     const zoomFit = () => graphRef.current?.zoomToFit(400, 60)
@@ -382,39 +358,17 @@ export default function KnowledgeGraph({ saves, userPhone }) {
                     ))}
                 </div>
 
-                {/* ── Admin: Rebuild Graph button ── */}
-                {isAdmin && (
-                    <div className="absolute bottom-4 left-4">
-                        <div className="flex flex-col gap-2">
-                            <Button
-                                variant="secondary"
-                                size="sm"
-                                onClick={handleRebuild}
-                                disabled={rebuilding}
-                                className="border-purple-500/30 bg-purple-500/10 text-purple-400 hover:bg-purple-500/20 text-xs"
-                            >
-                                {rebuilding
-                                    ? <><Loader2 className="mr-1.5 h-3 w-3 animate-spin" />Building…</>
-                                    : <><RefreshCw className="mr-1.5 h-3 w-3" />Rebuild Graph</>}
-                            </Button>
-                            {rebuildResult && (
-                                <div className="rounded-lg border border-white/10 bg-[#0e0e1a]/90 p-2 text-[10px] text-white/60">
-                                    {rebuildResult.error
-                                        ? <span className="text-red-400">Error: {rebuildResult.error}</span>
-                                        : <span>✅ {rebuildResult.processed} processed, {rebuildResult.errors} errors</span>
-                                    }
-                                </div>
-                            )}
-                        </div>
-                    </div>
-                )}
 
                 {/* ── Status: no live data ── */}
                 {!loading && !usingLiveData && (
                     <div className="absolute bottom-16 left-1/2 -translate-x-1/2 rounded-xl border border-amber-500/20 bg-amber-500/10 px-4 py-2 text-xs text-amber-400">
-                        {isAdmin
-                            ? 'Neo4j not configured yet. Add secrets and click "Rebuild Graph".'
-                            : 'Showing local tag graph. Add Neo4j credentials for the real entity graph.'}
+                        {loadError ? (
+                            <span className="text-red-400">⚠️ Graph Database Offline: {loadError}</span>
+                        ) : isAdmin ? (
+                            'Neo4j not configured yet. Add secrets and click "Rebuild Graph".'
+                        ) : (
+                            'Showing local tag graph. Add Neo4j credentials for the real entity graph.'
+                        )}
                     </div>
                 )}
             </Card>

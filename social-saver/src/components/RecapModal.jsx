@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import { Sparkles, X, Loader2, TrendingUp, Calendar, Zap, Award, Target } from 'lucide-react'
 import { Button } from './ui/Button'
@@ -47,6 +47,14 @@ export default function RecapModal({ userPhone, useMock }) {
         setLoading(false)
     }
 
+    // Close on Escape key
+    useEffect(() => {
+        if (!open) return
+        const handler = (e) => { if (e.key === 'Escape') setOpen(false) }
+        document.addEventListener('keydown', handler)
+        return () => document.removeEventListener('keydown', handler)
+    }, [open])
+
     // Parse specific insights if available, or just render list
     const parsedInsights = useMemo(() => {
         if (!recap?.recap) return []
@@ -89,6 +97,9 @@ export default function RecapModal({ userPhone, useMock }) {
                                 animate={{ opacity: 1, scale: 1, y: 0 }}
                                 exit={{ opacity: 0, scale: 0.95, y: 10 }}
                                 transition={{ duration: 0.2 }}
+                                role="dialog"
+                                aria-modal="true"
+                                aria-labelledby="recap-modal-title"
                                 className="relative w-full max-w-lg overflow-hidden rounded-2xl border border-white/10 bg-[#161616] shadow-2xl shadow-[var(--color-accent)]/10"
                                 onClick={e => e.stopPropagation()}
                             >
@@ -103,7 +114,7 @@ export default function RecapModal({ userPhone, useMock }) {
                                             <Sparkles className="w-5 h-5 text-[var(--color-accent)]" />
                                         </div>
                                         <div>
-                                            <h2 className="text-base font-bold tracking-tight text-white">
+                                            <h2 id="recap-modal-title" className="text-base font-bold tracking-tight text-white">
                                                 {recap?.period || 'Weekly'} Recap
                                             </h2>
                                             <p className="text-xs font-medium text-white/40">
