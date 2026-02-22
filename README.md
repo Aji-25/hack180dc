@@ -32,7 +32,7 @@
 
 **Knowledge Graph — Neo4j Entity Map**
 
-![Knowledge Graph](social-saver/public/screenshots/knowledge_graph.png)
+![Knowledge Graph](<img width="1511" height="761" alt="Screenshot 2026-02-22 at 11 11 35 PM" src="https://github.com/user-attachments/assets/34b81ed2-9c23-4fb6-b4b6-fecd75e64961" />)
 
 **Weekly AI Recap**
 
