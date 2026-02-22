@@ -15,7 +15,6 @@ const APP_URL = Deno.env.get("APP_URL") || "https://social-saver.vercel.app";
 
 import twilio from "npm:twilio";
 import { callOpenAI, generateEmbedding, transcribeAudio, describeImage } from "../_shared/llm.ts";
-const APP_URL = Deno.env.get("APP_URL") || "https://social-saver.vercel.app";
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
