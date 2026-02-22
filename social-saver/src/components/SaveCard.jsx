@@ -259,10 +259,9 @@ export default function SaveCard({ save, onDelete, onUpdate }) {
                     {/* Title / Summary */}
                     <div className="space-y-1">
                         <h3 className="line-clamp-3 text-[15px] font-medium leading-relaxed text-white/90 group-hover:text-white transition-colors">
-                            {category === 'Other' && hostname.includes('instagram.com')
+                            {!title && !summary && hostname.includes('instagram.com')
                                 ? 'Instagram Reel/Post - Protected Content'
-                                : (summary || title || 'Saved link')}
-                        </h3>
+                                : (summary || title || 'Saved link')}</h3>
                         <a
                             href={url}
                             target="_blank"
