@@ -67,7 +67,7 @@ blob-report/
 playwright/.cache/
 
 # ── Temp test & debug scripts (ad-hoc one-off files) ─────────────────────────
-# Named utilities like trigger_graph.js and fetch_logs.js are NOT ignored.
+# Prefixed scratch files
 test_*.cjs
 test_*.js
 test_*.mjs
@@ -77,6 +77,19 @@ debug_*.js
 debug_*.ts
 _scratch_*.js
 _scratch_*.ts
+
+# Common ad-hoc script names (never commit ephemeral DB utilities)
+fetch_logs.js
+trigger_graph.js
+queue_graph_jobs.js
+wipe_db.js
+patch_saves.js
+fix_*.js
+reclassify.js
+migrate_hash.js
+populate_*.js
+populate_*.cjs
+seed_*.js
 
 # ── Test output / log dumps ───────────────────────────────────────────────────
 test_output*.txt
