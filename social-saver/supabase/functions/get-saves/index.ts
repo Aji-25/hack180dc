@@ -43,7 +43,7 @@ Deno.serve(async (req) => {
                 .from('saves')
                 .select('category, created_at')
                 .eq('user_phone', phone)
-                .eq('is_deleted', false)
+                .neq('is_deleted', true)
             if (error) throw error
             return new Response(JSON.stringify(data || []), { status: 200, headers: corsHeaders })
         }
@@ -56,7 +56,7 @@ Deno.serve(async (req) => {
                 .select('*', { count: 'exact', head: true })
                 .eq('user_phone', phone)
                 .eq('status', 'complete')
-                .eq('is_deleted', false)
+                .neq('is_deleted', true)
 
             if (!count || count === 0) {
                 return new Response(JSON.stringify(null), { status: 200, headers: corsHeaders })
@@ -68,7 +68,7 @@ Deno.serve(async (req) => {
                 .select('*')
                 .eq('user_phone', phone)
                 .eq('status', 'complete')
-                .eq('is_deleted', false)
+                .neq('is_deleted', true)
                 .range(randomOffset, randomOffset)
 
             return new Response(JSON.stringify(data?.[0] || null), { status: 200, headers: corsHeaders })
@@ -79,7 +79,7 @@ Deno.serve(async (req) => {
             .from('saves')
             .select('*')
             .eq('user_phone', phone)
-            .eq('is_deleted', false)
+            .neq('is_deleted', true)
             .order('created_at', { ascending: false })
             .range(offset, offset + limit - 1)
 
