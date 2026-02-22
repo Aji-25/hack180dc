@@ -365,11 +365,10 @@ Deno.serve(async (req) => {
             twilioParams[key] = val.toString();
         }
 
-        // Use external URL for validation because Supabase passes the internal edge fn URL in req.url
-        // E.g. https://<project.supabase.co>/functions/v1/whatsapp-webhook
-        const urlToValidate = req.headers.get("x-forwarded-host")
-            ? `https://${req.headers.get("x-forwarded-host")}/functions/v1/whatsapp-webhook`
-            : req.url;
+        // Use the canonical public URL (APP_URL env var) for Twilio signature validation.
+        // req.url and x-forwarded-host are unreliable inside Supabase Edge — Twilio signs
+        // against the public URL as configured in the Twilio console.
+        const urlToValidate = `${APP_URL}`;
 
         const isValid = twilio.validateRequest(
             twilioAuthToken,
